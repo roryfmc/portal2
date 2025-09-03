@@ -5,8 +5,15 @@ import { prisma } from "../../../lib/prisma"
 export async function GET() {
   try {
     const sites = await prisma.constructionSite.findMany({
-      include: { client: true },
-    })
+      include: {
+        operatives: {
+          include: {
+            operative: true, // fetch the operative info
+          },
+        },
+        client: true, // fetch the client info
+      },
+    });
     return NextResponse.json(sites)
   } catch (error) {
     console.error("Error fetching sites:", error)

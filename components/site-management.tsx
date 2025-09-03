@@ -27,6 +27,9 @@ export function SiteManagement() {
   const [searchTerm, setSearchTerm] = useState("")
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [editingSite, setEditingSite] = useState<ConstructionSite | null>(null)
+  const [operatives, setOperatives] = useState<{ id: string; name: string }[]>([])
+
+  
 
   const [formData, setFormData] = useState({
     name: "",
@@ -37,6 +40,7 @@ export function SiteManagement() {
     endDate: "",
     requiredTrades: "",
     maxOperatives: "",
+    assignedOperatives: [] as { operativeId: string; startDate: string; endDate: string }[],
   })
 
   // Fetch sites and clients from backend
@@ -50,6 +54,10 @@ export function SiteManagement() {
       .then((res) => res.json())
       .then(setClients)
       .catch((err) => console.error("Failed to fetch clients", err))
+    fetch("/api/operatives")
+      .then((res) => res.json())
+      .then(setOperatives)
+      .catch((err) => console.error("Failed to fetch operatives", err))
   }, [])
 
   const filteredSites = sites.filter(
@@ -116,25 +124,32 @@ export function SiteManagement() {
       endDate: "",
       requiredTrades: "",
       maxOperatives: "",
+      assignedOperatives: [],
     })
     setEditingSite(null)
     setIsAddDialogOpen(false)
   }
 
   const handleEdit = (site: ConstructionSite) => {
-    setEditingSite(site)
-    setFormData({
-      name: site.name,
-      address: site.address,
-      clientId: site.clientId,
-      projectType: site.projectType,
-      startDate: new Date(site.startDate).toISOString().split("T")[0],
-      endDate: new Date(site.endDate).toISOString().split("T")[0],
-      requiredTrades: site.requiredTrades.join(", "),
-      maxOperatives: site.maxOperatives.toString(),
-    })
-    setIsAddDialogOpen(true)
-  }
+  setEditingSite(site)
+  setFormData({
+    name: site.name,
+    address: site.address,
+    clientId: site.clientId,
+    projectType: site.projectType,
+    startDate: new Date(site.startDate).toISOString().split("T")[0],
+    endDate: new Date(site.endDate).toISOString().split("T")[0],
+    requiredTrades: site.requiredTrades.join(", "),
+    maxOperatives: site.maxOperatives.toString(),
+    assignedOperatives: site.operatives?.map((so) => ({
+      operativeId: so.operativeId.toString(),
+      startDate: so.startDate,
+      endDate: so.endDate,
+    })) || [], // default to empty array if no operatives
+  })
+  setIsAddDialogOpen(true)
+}
+
 
   const handleDelete = async (id: string) => {
     try {
@@ -301,7 +316,35 @@ export function SiteManagement() {
                   required
                 />
               </div>
-
+              <div className="space-y-2">
+                <Label>Assign Operatives</Label>
+                <div className="flex flex-wrap gap-2">
+                  {operatives.map((op) => {
+                    const selected = formData.assignedOperatives.some((a) => a.operativeId === op.id)
+                    return (
+                      <Button
+                        key={op.id}
+                        variant={selected ? "secondary" : "outline"}
+                        size="sm"
+                        onClick={() => {
+                          let updated
+                          if (selected) {
+                            updated = formData.assignedOperatives.filter((a) => a.operativeId !== op.id)
+                          } else {
+                            updated = [
+                              ...formData.assignedOperatives,
+                              { operativeId: op.id, startDate: formData.startDate, endDate: formData.endDate },
+                            ]
+                          }
+                          setFormData({ ...formData, assignedOperatives: updated })
+                        }}
+                      >
+                        {op.name}
+                      </Button>
+                    )
+                  })}
+                </div>
+              </div>
               <DialogFooter>
                 <Button type="button" variant="outline" onClick={resetForm}>
                   Cancel
