@@ -1,0 +1,83 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Operative {
+  id             Int      @id @default(autoincrement())
+  name           String
+  email          String   @unique
+  phone          String?
+  trade          String
+  certifications String[]
+  status         String
+  hourlyRate     Float
+  createdAt      DateTime @default(now())
+
+  sites         SiteOperative[]
+}
+
+model Client {
+  id            Int      @id @default(autoincrement())
+  name          String
+  email         String   @unique
+  phone         String?
+  company       String
+  contactPerson String
+  createdAt     DateTime @default(now())
+  sites         ConstructionSite[]
+}
+
+model ConstructionSite {
+  id             Int      @id @default(autoincrement())
+  name           String
+  address        String
+  clientId       Int
+  projectType    String
+  startDate      DateTime
+  endDate        DateTime
+  status         String
+  requiredTrades String[]
+  maxOperatives  Int
+  createdAt      DateTime @default(now())
+  client         Client   @relation(fields: [clientId], references: [id])
+
+  operatives     SiteOperative[]
+}
+
+model Manager {
+  id         Int    @id @default(autoincrement())
+  name       String
+  email      String @unique
+  department String
+  avatar     String?
+}
+
+model SiteAssignment {
+  id          Int      @id @default(autoincrement())
+  operativeId Int
+  siteId      Int
+  startDate   DateTime
+  endDate     DateTime
+  trade       String
+  dailyRate   Float
+  status      String
+  notes       String?
+  createdAt   DateTime @default(now())
+}
+
+model SiteOperative {
+  id          Int             @id @default(autoincrement())
+  siteId      Int
+  site        ConstructionSite @relation(fields: [siteId], references: [id])
+  operativeId Int
+  operative   Operative       @relation(fields: [operativeId], references: [id])
+  startDate   DateTime
+  endDate     DateTime
+
+  @@unique([siteId, operativeId])
+}
