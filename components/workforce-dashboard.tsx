@@ -1,59 +1,85 @@
 "use client"
 
+import { useEffect, useMemo, useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Progress } from "@/components/ui/progress"
-import { HardHat, Building2, Users, Calendar, TrendingUp, Clock, Phone, Mail, Plus } from "lucide-react"
-import { mockOperatives, mockConstructionSites, mockSiteAssignments, mockClients } from "@/lib/data"
+import { HardHat, Building2, Users, Calendar, Clock, Phone, Mail, Plus } from "lucide-react"
+import type { Operative, ConstructionSite, Client } from "@/lib/types"
 
 export function WorkforceDashboard() {
-  // Calculate metrics
-  const totalOperatives = mockOperatives.length
-  const availableOperatives = mockOperatives.filter((op) => op.status === "available").length
-  const deployedOperatives = mockOperatives.filter((op) => op.status === "deployed").length
-  const totalSites = mockConstructionSites.length
-  const activeSites = mockConstructionSites.filter((site) => site.status === "active").length
-  const totalClients = mockClients.length
+  const [operatives, setOperatives] = useState<Operative[]>([])
+  const [sites, setSites] = useState<ConstructionSite[]>([])
+  const [clients, setClients] = useState<Client[]>([])
+  const [assignments, setAssignments] = useState<any[]>([])
 
-  // Calculate deployment rate
-  const deploymentRate = totalOperatives > 0 ? (deployedOperatives / totalOperatives) * 100 : 0
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const [opsRes, sitesRes, clientsRes, assignsRes] = await Promise.all([
+          fetch("/api/operatives"),
+          fetch("/api/sites"),
+          fetch("/api/clients"),
+          fetch("/api/assignments"),
+        ])
+        if (opsRes.ok) setOperatives(await opsRes.json())
+        if (sitesRes.ok) setSites(await sitesRes.json())
+        if (clientsRes.ok) setClients(await clientsRes.json())
+        if (assignsRes.ok) setAssignments(await assignsRes.json())
+      } catch (e) {
+        console.error("Failed to load dashboard data:", e)
+      }
+    }
+    load()
+  }, [])
 
-  // Get recent assignments
-  const recentAssignments = mockSiteAssignments
-    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-    .slice(0, 5)
+  const totalOperatives = operatives.length
+  const activeSites = sites.filter((s) => String(s.status).toLowerCase() === "active").length
+  const totalSites = sites.length
+  const totalClients = clients.length
 
-  // Get upcoming assignments (starting soon)
-  const upcomingAssignments = mockSiteAssignments
-    .filter((assignment) => {
-      const startDate = new Date(assignment.startDate)
-      const today = new Date()
-      const daysDiff = Math.ceil((startDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
-      return daysDiff >= 0 && daysDiff <= 7 && assignment.status === "scheduled"
+  const now = new Date()
+  const withStatus = useMemo(() => {
+    return (assignments || []).map((a: any) => {
+      const start = new Date(a.startDate)
+      const end = new Date(a.endDate)
+      let status: "upcoming" | "active" | "completed" = "upcoming"
+      if (end < now) status = "completed"
+      else if (start <= now && end >= now) status = "active"
+      return { ...a, startDate: start, endDate: end, derivedStatus: status }
     })
-    .sort((a, b) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime())
+  }, [assignments])
 
-  const getOperativeName = (operativeId: string) => {
-    const operative = mockOperatives.find((op) => op.id === operativeId)
-    return operative?.name || "Unknown Operative"
+  const upcomingAssignments = useMemo(() => {
+    const end = new Date()
+    end.setDate(end.getDate() + 7)
+    return withStatus
+      .filter((a) => a.startDate >= now && a.startDate <= end)
+      .sort((a, b) => a.startDate.getTime() - b.startDate.getTime())
+  }, [withStatus])
+
+  const recentAssignments = useMemo(() => {
+    return [...withStatus].sort((a, b) => b.startDate.getTime() - a.startDate.getTime()).slice(0, 5)
+  }, [withStatus])
+
+  const getOperativeName = (operativeId: string | number) => {
+    const op = operatives.find((o) => String(o.id) === String(operativeId))
+    return op?.name || "Unknown Operative"
   }
 
-  const getSiteName = (siteId: string) => {
-    const site = mockConstructionSites.find((s) => s.id === siteId)
-    return site?.name || "Unknown Site"
+  const getSiteName = (siteId: string | number) => {
+    const s = sites.find((x: any) => String(x.id) === String(siteId))
+    return s?.name || "Unknown Site"
   }
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
+  const getStatusBadge = (derived: string) => {
+    switch (derived) {
       case "active":
         return "bg-green-100 text-green-800"
-      case "scheduled":
+      case "upcoming":
         return "bg-blue-100 text-blue-800"
       case "completed":
         return "bg-gray-100 text-gray-800"
-      case "cancelled":
-        return "bg-red-100 text-red-800"
       default:
         return "bg-gray-100 text-gray-800"
     }
@@ -75,9 +101,7 @@ export function WorkforceDashboard() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{totalOperatives}</div>
-            <p className="text-xs text-muted-foreground">
-              {availableOperatives} available, {deployedOperatives} deployed
-            </p>
+            <p className="text-xs text-muted-foreground">Total workforce</p>
           </CardContent>
         </Card>
 
@@ -94,23 +118,23 @@ export function WorkforceDashboard() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Deployment Rate</CardTitle>
-            <TrendingUp className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{deploymentRate.toFixed(1)}%</div>
-            <Progress value={deploymentRate} className="mt-2" />
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total Clients</CardTitle>
             <Users className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{totalClients}</div>
             <p className="text-xs text-muted-foreground">Active partnerships</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Upcoming Assignments</CardTitle>
+            <Calendar className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{upcomingAssignments.length}</div>
+            <p className="text-xs text-muted-foreground">Next 7 days</p>
           </CardContent>
         </Card>
       </div>
@@ -123,7 +147,7 @@ export function WorkforceDashboard() {
               <Calendar className="h-5 w-5" />
               Upcoming Assignments
             </CardTitle>
-            <CardDescription>Assignments starting within the next 7 days</CardDescription>
+            <CardDescription>Next 7 days of site assignments</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             {upcomingAssignments.length > 0 ? (
@@ -133,12 +157,11 @@ export function WorkforceDashboard() {
                     <p className="font-medium">{getOperativeName(assignment.operativeId)}</p>
                     <p className="text-sm text-muted-foreground">{getSiteName(assignment.siteId)}</p>
                     <p className="text-xs text-muted-foreground">
-                      Starts: {new Date(assignment.startDate).toLocaleDateString()}
+                      Starts {new Date(assignment.startDate).toLocaleDateString()} to {new Date(assignment.endDate).toLocaleDateString()}
                     </p>
                   </div>
                   <div className="text-right">
-                    <Badge className={getStatusColor(assignment.status)}>{assignment.status}</Badge>
-                    <p className="text-sm font-medium mt-1">£{assignment.dailyRate}/day</p>
+                    <Badge className={getStatusBadge(assignment.derivedStatus)}>{assignment.derivedStatus}</Badge>
                   </div>
                 </div>
               ))
@@ -167,11 +190,9 @@ export function WorkforceDashboard() {
                   <div className="space-y-1">
                     <p className="font-medium">{getOperativeName(assignment.operativeId)}</p>
                     <p className="text-sm text-muted-foreground">{getSiteName(assignment.siteId)}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {assignment.trade} • {new Date(assignment.createdAt).toLocaleDateString()}
-                    </p>
+                    <p className="text-xs text-muted-foreground">Start {new Date(assignment.startDate).toLocaleDateString()}</p>
                   </div>
-                  <Badge className={getStatusColor(assignment.status)}>{assignment.status}</Badge>
+                  <Badge className={getStatusBadge(assignment.derivedStatus)}>{assignment.derivedStatus}</Badge>
                 </div>
               ))
             ) : (
@@ -195,7 +216,7 @@ export function WorkforceDashboard() {
         </CardHeader>
         <CardContent>
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {mockOperatives.map((operative) => (
+            {operatives.map((operative) => (
               <div key={operative.id} className="flex items-center justify-between p-3 border rounded-lg">
                 <div className="space-y-1">
                   <p className="font-medium">{operative.name}</p>
@@ -233,7 +254,7 @@ export function WorkforceDashboard() {
         </CardContent>
       </Card>
 
-      {/* Quick Actions */}
+      {/* Quick Actions (optional) */}
       <Card>
         <CardHeader>
           <CardTitle>Quick Actions</CardTitle>
@@ -263,3 +284,4 @@ export function WorkforceDashboard() {
     </div>
   )
 }
+
