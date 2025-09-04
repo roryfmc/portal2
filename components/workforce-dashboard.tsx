@@ -246,7 +246,7 @@ export function WorkforceDashboard() {
                   >
                     {operative.status}
                   </Badge>
-                  <p className="text-sm font-medium mt-1">£{operative.hourlyRate}/hr</p>
+                  
                 </div>
               </div>
             ))}

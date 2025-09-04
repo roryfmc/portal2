@@ -23,7 +23,7 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { name, email, phone, trade, certifications, hourlyRate } = body
+    const { name, email, phone, trade} = body
 
     const operative = await prisma.operative.create({
       data: {
@@ -31,8 +31,6 @@ export async function POST(request: NextRequest) {
         email,
         phone,
         trade,
-        certifications,
-        hourlyRate: Number.parseFloat(hourlyRate),
         status: "available",
       },
     })

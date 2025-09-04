@@ -19,7 +19,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Plus, Search, Edit, Trash2, HardHat, Phone, Mail } from "lucide-react"
 import type { Operative } from "@/lib/types"
-import { toast } from "@/components/ui/use-toast"
 export function OperativeManagement() {
   const [operatives, setOperatives] = useState<Operative[]>([])
   const [loading, setLoading] = useState(true)
@@ -36,17 +35,20 @@ export function OperativeManagement() {
     // note: we will derive the string[] to send from certEntries
     // hourlyRate: "",
   })
-  useEffect(() => {
-    fetchOperatives()
-    fetchAssignments()
-    fetchSites()
-  }, [])
+  const [certEntries, setCertEntries] = useState<{ type: string; validUntil: string }[]>([])
+  const [newCertType, setNewCertType] = useState<string>("")
+  const [newCertDate, setNewCertDate] = useState<string>("")
   const filteredOperatives = operatives.filter(
     (operative) =>
       operative.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       operative.trade.toLowerCase().includes(searchTerm.toLowerCase()) ||
       operative.email.toLowerCase().includes(searchTerm.toLowerCase()),
   )
+  useEffect(() => {
+    fetchOperatives()
+    fetchAssignments()
+    fetchSites()
+  }, [])
   const fetchOperatives = async () => {
     try {
       const response = await fetch("/api/operatives")
@@ -94,6 +96,9 @@ export function OperativeManagement() {
       email: formData.email,
       phone: formData.phone,
       trade: formData.trade,
+      certifications: certEntries.map((c) =>
+        c.validUntil ? `${c.type} (valid until ${c.validUntil})` : c.type
+      ),
       // hourlyRate: formData.hourlyRate,
     }
     try {
@@ -129,6 +134,9 @@ export function OperativeManagement() {
       trade: "",
       // hourlyRate: "",
     })
+    setCertEntries([])
+    setNewCertType("")
+    setNewCertDate("")
     setEditingOperative(null)
     setIsAddDialogOpen(false)
   }
@@ -142,27 +150,28 @@ export function OperativeManagement() {
       // hourlyRate: operative.hourlyRate.toString(),
     })
     // parse existing certifications into entries if they include a "(valid until ...)" suffix
-    
+    const parsed = (operative.certifications || []).map((s: string) => {
+      const m = s.match(/^(.+?)\s*\(valid until\s+([^)]+)\)$/i)
+      if (m) return { type: m[1], validUntil: m[2] }
+      return { type: s, validUntil: "" }
+    })
+    setCertEntries(parsed)
+    setNewCertType("")
+    setNewCertDate("")
     setIsAddDialogOpen(true)
   }
   const handleDelete = async (id: string) => {
     try {
-      const res = await fetch(`/api/operatives/${Number(id)}`, { method: "DELETE" })
-      if (res.ok) {
-        setOperatives(operatives.filter((operative) => operative.id !== id))
-      } else {
-        const body = await res.json().catch(() => ({}))
-        toast({
-          title: "Cannot delete operative, please remove them from assoicated site",
-          description: body?.error || "Operative has associated sites. Remove them first.",
-        })
+      const response = await fetch(`/api/operatives/${Number(id)}`, {
+        method: "DELETE",
+      })
+      if (response.ok) {
+        await fetchOperatives()
       }
     } catch (error) {
       console.error("Error deleting operative:", error)
-      toast({ title: "Delete failed", description: "An unexpected error occurred." })
     }
   }
-  
   const getStatusColor = (status: Operative["status"]) => {
     switch (status) {
       case "available":
@@ -272,6 +281,64 @@ export function OperativeManagement() {
                   </Select>
                 </div>
               </div>
+              <div className="space-y-2">
+                <Label>Certifications</Label>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div className="space-y-2 md:col-span-1">
+                    <Label>Certification Type</Label>
+                    <Select value={newCertType} onValueChange={setNewCertType}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select certificate" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="CSCS Card">CSCS Card</SelectItem>
+                        <SelectItem value="First Aid">First Aid</SelectItem>
+                        <SelectItem value="Asbestos Awareness">Asbestos Awareness</SelectItem>
+                        <SelectItem value="SMSTS">SMSTS</SelectItem>
+                        <SelectItem value="SSSTS">SSSTS</SelectItem>
+                        <SelectItem value="PASMA">PASMA</SelectItem>
+                        <SelectItem value="IPAF">IPAF</SelectItem>
+                        <SelectItem value="Confined Spaces">Confined Spaces</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2 md:col-span-1">
+                    <Label htmlFor="validUntil">Valid Until</Label>
+                    <Input id="validUntil" type="date" value={newCertDate} onChange={(e) => setNewCertDate(e.target.value)} />
+                  </div>
+                  <div className="flex items-end md:col-span-1">
+                    <Button type="button" onClick={() => {
+                      if (!newCertType) return
+                      setCertEntries([...certEntries, { type: newCertType, validUntil: newCertDate }])
+                      setNewCertType("")
+                      setNewCertDate("")
+                    }}>Add Certification</Button>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  {certEntries.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No certifications added</p>
+                  ) : (
+                    certEntries.map((c, idx) => (
+                      <div key={idx} className="flex items-center justify-between border rounded-md p-2 text-sm">
+                        <span>{c.type}{c.validUntil ? ` (valid until ${c.validUntil})` : ""}</span>
+                        <Button type="button" variant="outline" size="sm" onClick={() => setCertEntries(certEntries.filter((_, i) => i !== idx))}>Remove</Button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="hourlyRate">Hourly Rate (£)</Label>
+                <Input
+                  id="hourlyRate"
+                  type="number"
+                  step="0.01"
+                  value={formData.hourlyRate}
+                  onChange={(e) => setFormData({ ...formData, hourlyRate: e.target.value })}
+                  required
+                />
+              </div>
               <DialogFooter>
                 <Button type="button" variant="outline" onClick={resetForm}>
                   Cancel
@@ -320,6 +387,19 @@ export function OperativeManagement() {
                     <span>{operative.phone}</span>
                   </div>
                 )}
+              </div>
+              <div className="space-y-2">
+                <p className="text-sm font-medium">Hourly Rate: ��{operative.hourlyRate}</p>
+                <div className="space-y-1">
+                  <p className="text-xs font-medium text-muted-foreground">Certifications:</p>
+                  <div className="flex flex-wrap gap-1">
+                    {operative.certifications.map((cert, index) => (
+                      <Badge key={index} variant="secondary" className="text-xs">
+                        {cert}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
               </div>
               <div className="space-y-1">
                 <p className="text-xs font-medium text-muted-foreground">Assignments:</p>

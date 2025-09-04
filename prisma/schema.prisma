@@ -13,9 +13,8 @@ model Operative {
   email          String   @unique
   phone          String?
   trade          String
-  certifications String[]
+  certifications String?
   status         String
-  hourlyRate     Float
   createdAt      DateTime @default(now())
 
   sites         SiteOperative[]

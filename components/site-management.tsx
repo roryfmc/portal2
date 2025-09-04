@@ -117,6 +117,15 @@ export function SiteManagement() {
       .filter(Boolean) as Operative[]
   }
 
+  const isOperativeDeployedNow = (operativeId: string) => {
+    const now = new Date()
+    return assignments.some((a: any) => {
+      const start = new Date(a.startDate)
+      const end = new Date(a.endDate)
+      return String(a.operativeId) === String(operativeId) && start <= now && end >= now
+    })
+  }
+
   const handleOperativeAssignment = async () => {
     if (!editingSite) return
 
@@ -469,6 +478,12 @@ export function SiteManagement() {
                                 })
                                 return
                               }
+                              if (isOperativeDeployedNow(operative.id)) {
+                                const ok = window.confirm(
+                                  `${operative.name} is currently deployed on another site. Assign to multiple sites?`
+                                )
+                                if (!ok) return
+                              }
                               setSelectedOperatives([...selectedOperatives, operative.id])
                             } else {
                               setSelectedOperatives(selectedOperatives.filter((id) => id !== operative.id))
@@ -481,8 +496,8 @@ export function SiteManagement() {
                             {operative.trade} • £{operative.hourlyRate}/hr
                           </p>
                         </div>
-                        <Badge variant={operative.status === "available" ? "default" : "secondary"}>
-                          {operative.status}
+                        <Badge variant={isOperativeDeployedNow(operative.id) ? "destructive" : "default"}>
+                          {isOperativeDeployedNow(operative.id) ? "Deployed" : "Available"}
                         </Badge>
                       </div>
                     ))}

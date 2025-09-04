@@ -4,7 +4,7 @@ import { prisma } from "../../../../lib/prisma"
 export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
   try {
     const body = await request.json()
-    const { name, email, phone, trade, certifications, hourlyRate } = body
+    const { name, email, phone, trade, certifications} = body
 
     const operative = await prisma.operative.update({
       where: { id: Number(params.id) }, // 🔑 ensure id is a number
@@ -13,8 +13,6 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
         email,
         phone,
         trade,
-        certifications,
-        hourlyRate: Number.parseFloat(hourlyRate),
       },
     })
 

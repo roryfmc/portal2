@@ -6,9 +6,7 @@ export interface Operative {
   email: string
   phone?: string
   trade: string // e.g., "Electrician", "Plumber", "General Laborer"
-  certifications: string[]
   status: "available" | "deployed" | "on-leave" | "unavailable"
-  hourlyRate: number
   createdAt: Date
 }
 
