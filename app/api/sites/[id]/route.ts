@@ -53,9 +53,14 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
 
 export async function DELETE(request: NextRequest, { params }: { params: { id: string } }) {
   try {
-    await prisma.constructionSite.delete({
-      where: { id: Number(params.id) },
-    })
+    const id = Number(params.id)
+
+    // Remove assigned operatives first, then delete site
+    await prisma.$transaction([
+      prisma.siteOperative.deleteMany({ where: { siteId: id } }),
+      prisma.constructionSite.delete({ where: { id } }),
+    ])
+
     return NextResponse.json({ message: "Site deleted successfully" })
   } catch (error) {
     console.error("Error deleting site:", error)

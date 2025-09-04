@@ -23,7 +23,7 @@ export function Navigation({ activeTab, onTabChange }: NavigationProps) {
         <div className="flex items-center gap-6 py-4">
           <div className="flex items-center gap-2">
             <HardHat className="h-6 w-6 text-primary" />
-            <span className="text-xl font-semibold">Workforce Tracker</span>
+            <span className="text-xl font-semibold">DKF Application</span>
           </div>
 
           <div className="flex items-center gap-2 ml-8">

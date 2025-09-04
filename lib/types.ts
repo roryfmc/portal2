@@ -47,7 +47,7 @@ export type SiteOperative = {
 };
 
 export interface Client {
-  id: string
+  id: number
   name: string
   email: string
   phone?: string

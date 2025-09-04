@@ -16,6 +16,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { Plus, Search, Edit, Trash2, Building, Phone, Mail, User } from "lucide-react"
+import { toast } from "@/components/ui/use-toast"
 import type { Client } from "@/lib/types"
 
 export function ClientManagement() {
@@ -119,9 +120,16 @@ export function ClientManagement() {
       const res = await fetch(`/api/clients/${id}`, { method: "DELETE" })
       if (res.ok) {
         setClients(clients.filter((client) => client.id !== id))
+      } else {
+        const body = await res.json().catch(() => ({}))
+        toast({
+          title: "Cannot delete client",
+          description: body?.error || "Client has associated sites. Remove them first.",
+        })
       }
     } catch (error) {
       console.error("Error deleting client:", error)
+      toast({ title: "Delete failed", description: "An unexpected error occurred." })
     }
   }
 

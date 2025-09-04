@@ -8,7 +8,7 @@ import { ChevronLeft, ChevronRight, Plus, Clock, Video, Phone, MapPin } from "lu
 import { mockSiteAssignments, mockOperatives, mockManagers } from "@/lib/data"
 import { getStoredAppointments, saveAppointment } from "@/lib/storage"
 import { AppointmentBookingModal } from "./appointment-booking-modal"
-import type { Appointment } from "@/lib/types"
+import type { Appointment, ConstructionSite, Operative } from "@/lib/types"
 
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
 const MONTHS = [
@@ -31,10 +31,58 @@ export function CalendarView() {
   const [selectedDate, setSelectedDate] = useState<Date | null>(null)
   const [showBookingModal, setShowBookingModal] = useState(false)
   const [appointments, setAppointments] = useState<Appointment[]>([])
+  const [sites, setSites] = useState<ConstructionSite[]>([])
+  const [loadingSites, setLoadingSites] = useState(false)
+  const [operatives, setOperatives] = useState<Operative[]>([])
+  const [loadingOperatives, setLoadingOperatives] = useState(false)
 
   useEffect(() => {
     const storedAppointments = getStoredAppointments()
     setAppointments([...mockSiteAssignments, ...storedAppointments])
+  }, [])
+
+  useEffect(() => {
+    const fetchSites = async () => {
+      try {
+        setLoadingSites(true)
+        const res = await fetch("/api/sites")
+        if (res.ok) {
+          const data = await res.json()
+          // normalize dates
+          setSites(
+            data.map((s: any) => ({
+              ...s,
+              startDate: new Date(s.startDate),
+              endDate: new Date(s.endDate),
+              createdAt: s.createdAt ? new Date(s.createdAt) : new Date(),
+            })),
+          )
+        }
+      } catch (e) {
+        console.error("Failed to fetch sites for calendar:", e)
+      } finally {
+        setLoadingSites(false)
+      }
+    }
+    fetchSites()
+  }, [])
+
+  useEffect(() => {
+    const fetchOperatives = async () => {
+      try {
+        setLoadingOperatives(true)
+        const res = await fetch("/api/operatives")
+        if (res.ok) {
+          const data = await res.json()
+          setOperatives(data)
+        }
+      } catch (e) {
+        console.error("Failed to fetch operatives for calendar:", e)
+      } finally {
+        setLoadingOperatives(false)
+      }
+    }
+    fetchOperatives()
   }, [])
 
   const handleAppointmentCreated = (newAppointment: Appointment) => {
@@ -82,6 +130,23 @@ export function CalendarView() {
     }
   }
 
+  const isDateInRange = (date: Date, start: Date, end: Date) => {
+    const d = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+    const s = new Date(start.getFullYear(), start.getMonth(), start.getDate())
+    const e = new Date(end.getFullYear(), end.getMonth(), end.getDate())
+    return d >= s && d <= e
+  }
+
+  const getFillBadge = (assignedCount: number, maxOperatives: number) => {
+    if (!maxOperatives || maxOperatives <= 0) return { label: "not filled", className: "bg-red-100 text-red-800" }
+    if (assignedCount >= maxOperatives) return { label: "filled", className: "bg-green-100 text-green-800" }
+    if (assignedCount > 0) return { label: "partial", className: "bg-yellow-100 text-yellow-800" }
+    return { label: "not filled", className: "bg-red-100 text-red-800" }
+  }
+
+  const sitesOnDate = (date: Date) =>
+    sites.filter((s) => isDateInRange(date, new Date(s.startDate), new Date(s.endDate)))
+
   const renderCalendarDays = () => {
     const days = []
 
@@ -91,7 +156,7 @@ export function CalendarView() {
 
     for (let day = 1; day <= daysInMonth; day++) {
       const date = new Date(year, month, day)
-      const appointments = getAppointmentsForDate(date)
+      const daySites = sitesOnDate(date)
       const isToday = date.toDateString() === new Date().toDateString()
       const isSelected = selectedDate?.toDateString() === date.toDateString()
 
@@ -105,20 +170,24 @@ export function CalendarView() {
         >
           <div className={`text-sm font-medium mb-1 ${isToday ? "text-primary font-semibold" : ""}`}>{day}</div>
           <div className="space-y-1">
-            {appointments.slice(0, 2).map((apt) => {
-              const operative = mockOperatives.find((o) => o.id === apt.candidateId)
+            {daySites.slice(0, 2).map((site) => {
+              const assigned = Array.isArray(site.operatives) ? site.operatives.length : 0
+              const fill = getFillBadge(assigned, site.maxOperatives)
               return (
                 <div
-                  key={apt.id}
-                  className="text-xs bg-primary/20 text-primary-foreground px-1 py-0.5 rounded truncate flex items-center gap-1"
+                  key={`site-${site.id}`}
+                  className={`text-[10px] px-1 py-0.5 rounded truncate flex items-center justify-between gap-1 border ${fill.className}`}
+                  title={`${site.name} (${assigned}/${site.maxOperatives})`}
                 >
-                  {getTypeIcon(apt.type)}
-                  <span className="truncate">{operative?.name}</span>
+                  <span className="truncate">{site.name}</span>
+                  <span className="shrink-0">
+                    {assigned}/{site.maxOperatives}
+                  </span>
                 </div>
               )
             })}
-            {appointments.length > 2 && (
-              <div className="text-xs text-muted-foreground">+{appointments.length - 2} more</div>
+            {daySites.length > 2 && (
+              <div className="text-xs text-muted-foreground">+{daySites.length - 2} more</div>
             )}
           </div>
         </div>,
@@ -127,6 +196,45 @@ export function CalendarView() {
 
     return days
   }
+
+  // Week metrics (Sunday-Saturday week containing currentDate)
+  const getWeekRange = (date: Date) => {
+    const day = date.getDay() // 0-6, 0=Sun
+    const start = new Date(date)
+    start.setDate(date.getDate() - day)
+    start.setHours(0, 0, 0, 0)
+    const end = new Date(start)
+    end.setDate(start.getDate() + 6)
+    end.setHours(23, 59, 59, 999)
+    return { start, end }
+  }
+
+  const { start: weekStart, end: weekEnd } = getWeekRange(currentDate)
+
+  const siteOverlapsRange = (site: ConstructionSite, start: Date, end: Date) => {
+    const s = new Date(site.startDate)
+    const e = new Date(site.endDate)
+    return e >= start && s <= end
+  }
+
+  const sitesThisWeek = sites.filter((s) => siteOverlapsRange(s, weekStart, weekEnd))
+
+  const assignedIdsThisWeek = new Set<string>(
+    sitesThisWeek.flatMap((s: any) =>
+      (s.operatives || [])
+        .filter((so: any) => {
+          const soStart = new Date(so.startDate)
+          const soEnd = new Date(so.endDate)
+          return soEnd >= weekStart && soStart <= weekEnd
+        })
+        .map((so: any) => String(so.operativeId))
+    )
+  )
+
+  const onSiteCount = assignedIdsThisWeek.size
+  const availableOperativesCount = operatives.length
+    ? operatives.filter((op) => !assignedIdsThisWeek.has(String(op.id))).length
+    : 0
 
   return (
     <div className="space-y-6">
@@ -183,35 +291,42 @@ export function CalendarView() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                {getAppointmentsForDate(selectedDate).map((apt) => {
-                  const operative = mockOperatives.find((o) => o.id === apt.candidateId)
-                  const manager = mockManagers.find((m) => m.id === apt.recruiterId)
-
+                {sitesOnDate(selectedDate).map((site) => {
+                  const assigned = Array.isArray(site.operatives) ? site.operatives : []
                   return (
-                    <div key={apt.id} className="p-3 border border-border rounded-lg space-y-2">
+                    <div key={site.id} className="p-3 border border-border rounded-lg space-y-2">
                       <div className="flex items-center justify-between">
-                        <Badge variant="secondary" className="flex items-center gap-1">
-                          {getTypeIcon(apt.type)}
-                          {apt.type}
+                        <div className="font-medium text-sm">{site.name}</div>
+                        <Badge variant="secondary">
+                          {assigned.length}/{site.maxOperatives}
                         </Badge>
-                        <span className="text-sm text-muted-foreground">
-                          {new Date(apt.startTime).toLocaleTimeString("en-US", {
-                            hour: "numeric",
-                            minute: "2-digit",
-                          })}
-                        </span>
                       </div>
-                      <div>
-                        <p className="font-medium text-sm">{operative?.name}</p>
-                        <p className="text-xs text-muted-foreground">{operative?.trade}</p>
-                        <p className="text-xs text-muted-foreground">managed by {manager?.name}</p>
+                      <div className="text-xs text-muted-foreground flex items-center gap-2">
+                        <MapPin className="h-3 w-3" />
+                        <span className="truncate">{site.address}</span>
                       </div>
+                      {assigned.length > 0 ? (
+                        <div className="flex flex-wrap gap-1">
+                          {assigned.slice(0, 6).map((so: any) => (
+                            <Badge key={so.id} variant="outline" className="text-[10px]">
+                              {so.operative?.name ?? `Operative ${so.operativeId}`}
+                            </Badge>
+                          ))}
+                          {assigned.length > 6 && (
+                            <Badge variant="outline" className="text-[10px]">
+                              +{assigned.length - 6} more
+                            </Badge>
+                          )}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-muted-foreground italic">No operatives assigned</p>
+                      )}
                     </div>
                   )
                 })}
 
-                {getAppointmentsForDate(selectedDate).length === 0 && (
-                  <p className="text-sm text-muted-foreground text-center py-4">No operatives assigned for this date</p>
+                {sitesOnDate(selectedDate).length === 0 && (
+                  <p className="text-sm text-muted-foreground text-center py-4">No active sites on this date</p>
                 )}
               </CardContent>
             </Card>
@@ -223,16 +338,16 @@ export function CalendarView() {
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="flex justify-between items-center">
-                <span className="text-sm text-muted-foreground">Total Assignments</span>
-                <Badge variant="secondary">{appointments.length}</Badge>
+                <span className="text-sm text-muted-foreground">Total Sites</span>
+                <Badge variant="secondary">{sitesThisWeek.length}</Badge>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-sm text-muted-foreground">Available Operatives</span>
-                <Badge variant="outline">{mockOperatives.filter((o) => o.status === "available").length}</Badge>
+                <Badge variant="outline">{availableOperativesCount}</Badge>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-sm text-muted-foreground">On Site</span>
-                <Badge variant="default">{mockOperatives.filter((o) => o.status === "on-site").length}</Badge>
+                <Badge variant="default">{onSiteCount}</Badge>
               </div>
             </CardContent>
           </Card>

@@ -18,6 +18,7 @@ export async function GET() {
 
 
 // POST create a new client
+// app/api/clients/route.ts
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
@@ -27,9 +28,9 @@ export async function POST(request: NextRequest) {
       data: {
         name,
         email,
-        phone,
-        company: company || null,           // optional
-        contactPerson: contactPerson || null, // optional
+        phone: phone ?? null,     // phone is optional in schema
+        company,                  // required
+        contactPerson,            // required
       },
     })
 
@@ -39,3 +40,4 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Failed to create client" }, { status: 500 })
   }
 }
+
