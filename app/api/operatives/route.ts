@@ -52,7 +52,7 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { trade, personalDetails, nextOfKin, rightToWork, availability } = body ?? {}
+    const { trade, personalDetails, nextOfKin, rightToWork, availability, complianceCertificates } = body ?? {}
     if (!personalDetails?.fullName || !personalDetails?.email) {
       return NextResponse.json(
         { error: "Missing required fields: personalDetails.fullName and personalDetails.email" },
@@ -118,6 +118,22 @@ export async function POST(request: NextRequest) {
                     ? availability.unavailableDates.filter(Boolean).map((d: string) => new Date(d))
                     : [],
                 },
+              },
+            }
+          : {}),
+        ...(Array.isArray(complianceCertificates) && complianceCertificates.length
+          ? {
+              complianceCertificates: {
+                create: complianceCertificates
+                  .filter((c: any) => c?.name)
+                  .map((c: any) => ({
+                    name: String(c.name),
+                    issuer: String(c.issuer || ""),
+                    issueDate: c.issueDate ? new Date(c.issueDate) : new Date(),
+                    expiryDate: c.expiryDate ? new Date(c.expiryDate) : new Date(),
+                    status: c.status || "VALID",
+                    documentUrl: c.documentUrl ?? null,
+                  })),
               },
             }
           : {}),

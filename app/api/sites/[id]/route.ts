@@ -7,7 +7,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
       where: { id: String(params.id) },
       include: {
         operatives: {           // include the join table entries
-          include: { operative: true } // include full operative details
+          include: { operative: { include: { personalDetails: true } } } // include full operative details
         }
       },
     })

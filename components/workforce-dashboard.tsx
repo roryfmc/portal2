@@ -5,6 +5,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { HardHat, Building2, Users, Calendar, Clock, Phone, Mail, Plus } from "lucide-react"
+import { ChartContainer, ChartLegend, ChartLegendContent, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart"
+import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts"
 import type { Operative, ConstructionSite, Client } from "@/lib/types"
 
 export function WorkforceDashboard() {
@@ -85,6 +87,104 @@ export function WorkforceDashboard() {
   const getDeploymentBadgeClass = (deployed: boolean) =>
     deployed ? "bg-red-100 text-red-800" : "bg-green-100 text-green-800"
 
+  // -------- Financials (current week Mon-Sun) --------
+  const msDay = 24 * 60 * 60 * 1000
+  const weekBounds = useMemo(() => {
+    const d = new Date()
+    const day = d.getDay() // 0 Sun..6 Sat
+    const offsetToMon = (day + 6) % 7 // Mon=0, Sun=6
+    const start = new Date(d)
+    start.setHours(0, 0, 0, 0)
+    start.setDate(start.getDate() - offsetToMon)
+    const end = new Date(start)
+    end.setDate(start.getDate() + 6)
+    end.setHours(23, 59, 59, 999)
+    return { start, end }
+  }, [])
+
+  const financials = useMemo(() => {
+    let revenue = 0
+    let pay = 0
+    let profit = 0
+
+    const clientsById = new Map<number, Client>()
+    for (const c of clients as any) clientsById.set(c.id as any, c)
+
+    for (const a of assignments as any) {
+      const site: any = a.site
+      if (!site) continue
+      const aStart = new Date(a.startDate)
+      const aEnd = new Date(a.endDate)
+      const start = new Date(Math.max(aStart.getTime(), weekBounds.start.getTime()))
+      const end = new Date(Math.min(aEnd.getTime(), weekBounds.end.getTime()))
+      start.setHours(0, 0, 0, 0)
+      end.setHours(0, 0, 0, 0)
+      if (end < start) continue
+      const days = Math.floor((end.getTime() - start.getTime()) / msDay) + 1
+
+      const client: any = clientsById.get(site.clientId)
+      const jt = client?.jobTypes?.find((j: any) => j.name === site.projectType)
+      const payRate = jt ? Number(jt.payRate) : 0
+      const clientCost = jt ? Number(jt.clientCost) : 0
+
+      revenue += clientCost * days
+      pay += payRate * days
+      profit += (clientCost - payRate) * days
+    }
+    return { revenue, pay, profit }
+  }, [assignments, clients, weekBounds])
+
+  const dailyFinancials = useMemo(() => {
+    // Initialize days Mon..Sun within the current week
+    const days: Array<{ label: string; date: Date; revenue: number; pay: number; profit: number }> = []
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(weekBounds.start)
+      d.setDate(weekBounds.start.getDate() + i)
+      d.setHours(0, 0, 0, 0)
+      days.push({
+        label: d.toLocaleDateString("en-GB", { weekday: "short" }),
+        date: d,
+        revenue: 0,
+        pay: 0,
+        profit: 0,
+      })
+    }
+
+    const clientsById = new Map<number, Client>()
+    for (const c of clients as any) clientsById.set(c.id as any, c)
+
+    for (const a of assignments as any) {
+      const site: any = a.site
+      if (!site) continue
+      const aStart = new Date(a.startDate)
+      const aEnd = new Date(a.endDate)
+      const client: any = clientsById.get(site.clientId)
+      const jt = client?.jobTypes?.find((j: any) => j.name === site.projectType)
+      const payRate = jt ? Number(jt.payRate) : 0
+      const clientCost = jt ? Number(jt.clientCost) : 0
+      if (!payRate && !clientCost) continue
+
+      for (let i = 0; i < 7; i++) {
+        const d = days[i].date
+        // Check if this day is covered by the assignment
+        if (d >= new Date(aStart.getFullYear(), aStart.getMonth(), aStart.getDate()) &&
+            d <= new Date(aEnd.getFullYear(), aEnd.getMonth(), aEnd.getDate())) {
+          days[i].revenue += clientCost
+          days[i].pay += payRate
+          days[i].profit += (clientCost - payRate)
+        }
+      }
+    }
+
+    return days
+  }, [assignments, clients, weekBounds])
+
+  const chartConfig = {
+    revenue: { label: "Revenue", color: "hsl(var(--chart-1))" },
+    pay: { label: "Pay", color: "hsl(var(--chart-2))" },
+    profit: { label: "Profit", color: "hsl(var(--chart-3))" },
+  }
+
   return (
     <div className="space-y-6">
       <div>
@@ -138,6 +238,90 @@ export function WorkforceDashboard() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Financial Stats (This Week) */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Calendar className="h-5 w-5" /> Financial Stats (This Week)
+          </CardTitle>
+          <CardDescription>
+            {weekBounds.start.toLocaleDateString()} - {weekBounds.end.toLocaleDateString()}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="p-4 border rounded-lg">
+              <p className="text-sm text-muted-foreground">Revenue</p>
+              <p className="text-2xl font-bold">£{financials.revenue.toFixed(2)}</p>
+            </div>
+            <div className="p-4 border rounded-lg">
+              <p className="text-sm text-muted-foreground">Pay</p>
+              <p className="text-2xl font-bold">£{financials.pay.toFixed(2)}</p>
+            </div>
+            <div className="p-4 border rounded-lg">
+              <p className="text-sm text-muted-foreground">Profit</p>
+              <p className="text-2xl font-bold">
+                £{financials.profit.toFixed(2)}
+              </p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Financial Breakdown (Mon–Sun) */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Calendar className="h-5 w-5" /> Daily Breakdown (This Week)
+          </CardTitle>
+          <CardDescription>
+            Revenue, Pay and Profit by day
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="overflow-x-auto">
+            <div className="min-w-[560px] grid grid-cols-4 gap-2 text-sm">
+              <div className="font-semibold">Day</div>
+              <div className="font-semibold">Revenue</div>
+              <div className="font-semibold">Pay</div>
+              <div className="font-semibold">Profit</div>
+              {dailyFinancials.map((d) => (
+                <>
+                  <div className="py-1">{d.label}</div>
+                  <div className="py-1">£{d.revenue.toFixed(2)}</div>
+                  <div className="py-1">£{d.pay.toFixed(2)}</div>
+                  <div className="py-1">£{d.profit.toFixed(2)}</div>
+                </>
+              ))}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Financial Chart (This Week) */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Calendar className="h-5 w-5" /> Financial Chart (This Week)
+          </CardTitle>
+          <CardDescription>Bar chart comparing Revenue, Pay and Profit</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ChartContainer config={chartConfig} className="w-full">
+            <BarChart data={dailyFinancials.map((d) => ({ day: d.label, revenue: d.revenue, pay: d.pay, profit: d.profit }))}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="day" />
+              <YAxis />
+              <ChartTooltip content={<ChartTooltipContent />} />
+              <ChartLegend content={<ChartLegendContent />} />
+              <Bar dataKey="revenue" fill="var(--color-revenue)" radius={[2, 2, 0, 0]} />
+              <Bar dataKey="pay" fill="var(--color-pay)" radius={[2, 2, 0, 0]} />
+              <Bar dataKey="profit" fill="var(--color-profit)" radius={[2, 2, 0, 0]} />
+            </BarChart>
+          </ChartContainer>
+        </CardContent>
+      </Card>
 
       <div className="grid gap-6 md:grid-cols-2">
         {/* Upcoming Assignments */}

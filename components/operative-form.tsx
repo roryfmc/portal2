@@ -12,6 +12,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { User, Users, FileText, Building, Shield, Calendar, Save, X, Plus, Trash2, Briefcase } from "lucide-react"
 import { DocumentUpload } from "@/components/document-upload"
 import type { Operative, WorkSite, ComplianceCertificate, TimeOffRequest } from "@/lib/types"
+import { toast } from "@/components/ui/use-toast"
 
 interface OperativeFormProps {
   operative?: Operative
@@ -846,10 +847,48 @@ export function OperativeForm({ operative, onSave, onCancel }: OperativeFormProp
                   <Shield className="w-5 h-5" />
                   Compliance Certificates
                 </CardTitle>
-                <Button onClick={addComplianceCertificate} variant="outline" size="sm">
-                  <Plus className="w-4 h-4 mr-2" />
-                  Add Certificate
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button onClick={addComplianceCertificate} variant="outline" size="sm">
+                    <Plus className="w-4 h-4 mr-2" />
+                    Add Certificate
+                  </Button>
+                  {operative?.id && (
+                    <Button
+                      size="sm"
+                      onClick={async () => {
+                        try {
+                          const payload = {
+                            complianceCertificates: (formData.complianceCertificates || []).map((c: any) => ({
+                              name: c.name,
+                              issuer: c.issuer,
+                              issueDate: c.issueDate ? new Date(c.issueDate).toISOString() : null,
+                              expiryDate: c.expiryDate ? new Date(c.expiryDate).toISOString() : null,
+                              status: c.status,
+                              documentUrl: c.documentUrl || null,
+                            })),
+                          }
+                          const res = await fetch(`/api/operatives/${operative.id}`, {
+                            method: "PUT",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify(payload),
+                          })
+                          if (!res.ok) {
+                            const err = await res.json().catch(() => null)
+                            throw new Error(err?.error || `Failed (HTTP ${res.status})`)
+                          }
+                          const updated = (await res.json()) as Operative
+                          setFormData((prev: any) => ({ ...prev, complianceCertificates: (updated as any).complianceCertificates || [] }))
+                          toast({ title: "Certificates saved" })
+                        } catch (e: any) {
+                          toast({ title: "Failed to save certificates", description: e?.message || "Unknown error" })
+                          console.error(e)
+                        }
+                      }}
+                    >
+                      Save Certificates
+                    </Button>
+                  )}
+                </div>
               </div>
             </CardHeader>
             <CardContent>

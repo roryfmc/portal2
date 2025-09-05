@@ -12,7 +12,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     const id = params.id // ⚠️ string UUID — do NOT cast to Number
     const body = await request.json()
 
-    const { trade, personalDetails, nextOfKin, rightToWork, availability } = body ?? {}
+    const { trade, personalDetails, nextOfKin, rightToWork, availability, complianceCertificates } = body ?? {}
 
     const updated = await prisma.operative.update({
       where: { id },
@@ -153,7 +153,43 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
       },
     })
 
-    return NextResponse.json(updated)
+    // Replace compliance certificates if provided
+    if (Array.isArray(complianceCertificates)) {
+      await prisma.$transaction([
+        prisma.complianceCertificate.deleteMany({ where: { operativeId: id } }),
+        ...(complianceCertificates.length
+          ? [
+              prisma.complianceCertificate.createMany({
+                data: complianceCertificates
+                  .filter((c: any) => c?.name)
+                  .map((c: any) => ({
+                    operativeId: id,
+                    name: String(c.name),
+                    issuer: String(c.issuer || ""),
+                    issueDate: c.issueDate ? new Date(c.issueDate) : new Date(),
+                    expiryDate: c.expiryDate ? new Date(c.expiryDate) : new Date(),
+                    status: c.status || "VALID",
+                    documentUrl: c.documentUrl ?? null,
+                  })),
+              }),
+            ]
+          : []),
+      ])
+    }
+
+    const refreshed = await prisma.operative.findUnique({
+      where: { id },
+      include: {
+        personalDetails: true,
+        nextOfKin: true,
+        rightToWork: true,
+        availability: true,
+        complianceCertificates: true,
+        workSites: true,
+      },
+    })
+
+    return NextResponse.json(refreshed || updated)
   } catch (error: any) {
     if (error instanceof Prisma.PrismaClientKnownRequestError) {
       if (error.code === "P2025") {

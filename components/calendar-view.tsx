@@ -4,8 +4,8 @@ import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { ChevronLeft, ChevronRight, Plus, Clock, Video, Phone, MapPin } from "lucide-react"
-import type {ConstructionSite, Operative } from "@/lib/types"
+import { ChevronLeft, ChevronRight, Plus, Clock, Video, Phone, MapPin, HardHat, Building2, AlertTriangle, PoundSterling } from "lucide-react"
+import type { ConstructionSite, Operative, Client } from "@/lib/types"
 
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
 const MONTHS = [
@@ -31,6 +31,8 @@ export function CalendarView() {
   const [loadingSites, setLoadingSites] = useState(false)
   const [operatives, setOperatives] = useState<Operative[]>([])
   const [loadingOperatives, setLoadingOperatives] = useState(false)
+  const [clients, setClients] = useState<Client[]>([])
+  const [assignments, setAssignments] = useState<any[]>([])
 
 
   useEffect(() => {
@@ -75,6 +77,22 @@ export function CalendarView() {
       }
     }
     fetchOperatives()
+  }, [])
+
+  useEffect(() => {
+    const loadExtra = async () => {
+      try {
+        const [cRes, aRes] = await Promise.all([
+          fetch("/api/clients"),
+          fetch("/api/assignments"),
+        ])
+        if (cRes.ok) setClients(await cRes.json())
+        if (aRes.ok) setAssignments(await aRes.json())
+      } catch (e) {
+        console.error("Failed to fetch clients/assignments for calendar:", e)
+      }
+    }
+    loadExtra()
   }, [])
 
 
@@ -126,6 +144,69 @@ export function CalendarView() {
 
   const sitesOnDate = (date: Date) =>
     sites.filter((s) => isDateInRange(date, new Date(s.startDate), new Date(s.endDate)))
+
+  // ---- Top-level stats (current snapshot + small financials) ----
+  const now = new Date()
+  const deployedNowCount = (() => {
+    const ids = new Set(
+      (assignments || [])
+        .filter((a: any) => new Date(a.startDate) <= now && new Date(a.endDate) >= now)
+        .map((a: any) => String(a.operativeId)),
+    )
+    return ids.size
+  })()
+
+  const activeSitesCount = sites.filter((s) => isDateInRange(now, new Date(s.startDate), new Date(s.endDate))).length
+
+  const notFulfilledCount = (() => {
+    let count = 0
+    for (const s of sites) {
+      if (!isDateInRange(now, new Date(s.startDate), new Date(s.endDate))) continue
+      const list = (s as any).operatives || []
+      const activeAssigned = list.filter((so: any) => isDateInRange(now, new Date(so.startDate), new Date(so.endDate))).length
+      if (s.maxOperatives > 0 && activeAssigned < s.maxOperatives) count++
+    }
+    return count
+  })()
+
+  // Financials (This Week: Mon–Sun)
+  const msDay = 24 * 60 * 60 * 1000
+  const weekBounds = (() => {
+    const d = new Date()
+    const day = d.getDay()
+    const offsetToMon = (day + 6) % 7
+    const start = new Date(d)
+    start.setHours(0, 0, 0, 0)
+    start.setDate(start.getDate() - offsetToMon)
+    const end = new Date(start)
+    end.setDate(start.getDate() + 6)
+    end.setHours(23, 59, 59, 999)
+    return { start, end }
+  })()
+
+  const smallFinancial = (() => {
+    let profit = 0
+    const clientsById = new Map<number, Client>()
+    for (const c of clients as any) clientsById.set(c.id as any, c)
+    for (const a of assignments as any) {
+      const site: any = a.site
+      if (!site) continue
+      const aStart = new Date(a.startDate)
+      const aEnd = new Date(a.endDate)
+      const start = new Date(Math.max(aStart.getTime(), weekBounds.start.getTime()))
+      const end = new Date(Math.min(aEnd.getTime(), weekBounds.end.getTime()))
+      start.setHours(0, 0, 0, 0)
+      end.setHours(0, 0, 0, 0)
+      if (end < start) continue
+      const days = Math.floor((end.getTime() - start.getTime()) / msDay) + 1
+      const client: any = clientsById.get(site.clientId)
+      const jt = client?.jobTypes?.find((j: any) => j.name === site.projectType)
+      const payRate = jt ? Number(jt.payRate) : 0
+      const clientCost = jt ? Number(jt.clientCost) : 0
+      profit += (clientCost - payRate) * days
+    }
+    return profit
+  })()
 
   const renderCalendarDays = () => {
     const days = []
@@ -238,6 +319,62 @@ export function CalendarView() {
         </Button>
       </div>
 
+      {/* Top Stats */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <Card>
+          <CardContent className="p-6">
+            <div className="flex items-center gap-4">
+              <div className="p-3 bg-primary/10 rounded-lg">
+                <HardHat className="w-6 h-6 text-primary" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold">{deployedNowCount}</p>
+                <p className="text-sm text-muted-foreground">Operatives Deployed</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-6">
+            <div className="flex items-center gap-4">
+              <div className="p-3 bg-green-100 rounded-lg">
+                <Building2 className="w-6 h-6 text-green-700" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold">{activeSitesCount}</p>
+                <p className="text-sm text-muted-foreground">Active Sites</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-6">
+            <div className="flex items-center gap-4">
+              <div className="p-3 bg-orange-100 rounded-lg">
+                <AlertTriangle className="w-6 h-6 text-orange-600" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold">{notFulfilledCount}</p>
+                <p className="text-sm text-muted-foreground">Not Fulfilled</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-6">
+            <div className="flex items-center gap-4">
+              <div className="p-3 bg-emerald-100 rounded-lg">
+                <PoundSterling className="w-6 h-6 text-emerald-700" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold">£{smallFinancial.toFixed(2)}</p>
+                <p className="text-sm text-muted-foreground">Profit (This Week)</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         <div className="lg:col-span-3">
           <Card>
@@ -287,11 +424,14 @@ export function CalendarView() {
                       </div>
                       {assigned.length > 0 ? (
                         <div className="flex flex-wrap gap-1">
-                          {assigned.slice(0, 6).map((so: any) => (
-                            <Badge key={so.id} variant="outline" className="text-[10px]">
-                              {so.operative?.name ?? `Operative ${so.operativeId}`}
-                            </Badge>
-                          ))}
+                          {assigned.slice(0, 6).map((so: any) => {
+                            const displayName = so?.operative?.personalDetails?.fullName || so?.operative?.id || `Operative ${so.operativeId}`
+                            return (
+                              <Badge key={so.id} variant="outline" className="text-[10px]">
+                                {displayName}
+                              </Badge>
+                            )
+                          })}
                           {assigned.length > 6 && (
                             <Badge variant="outline" className="text-[10px]">
                               +{assigned.length - 6} more

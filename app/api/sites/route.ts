@@ -8,7 +8,9 @@ export async function GET() {
       include: {
         operatives: {
           include: {
-            operative: true, // fetch the operative info
+            operative: {
+              include: { personalDetails: true },
+            },
           },
         },
         client: true, // fetch the client info
