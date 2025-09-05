@@ -1,0 +1,96 @@
+// app/api/operatives/route.ts
+import { NextRequest, NextResponse } from "next/server"
+import { prisma } from "@/lib/prisma"
+
+/**
+ * GET /api/operatives
+ * Returns operatives with the relations the UI expects.
+ */
+export async function GET() {
+  try {
+    const operatives = await prisma.operative.findMany({
+      orderBy: { createdAt: "desc" },
+      include: {
+        personalDetails: true,
+        complianceCertificates: true,
+        workSites: true,
+        nextOfKin: true,
+        rightToWork: true,
+        availability: true,
+        siteAssignments: true,
+        siteLinks: true,
+      },
+    })
+    return NextResponse.json(operatives)
+  } catch (error) {
+    console.error("Error fetching operatives:", error)
+    return NextResponse.json({ error: "Failed to fetch operatives" }, { status: 500 })
+  }
+}
+
+/**
+ * POST /api/operatives
+ * Create an operative + nested personalDetails.
+ *
+ * Expected payload:
+ * {
+ *   "trade": "Carpenter",
+ *   "status": "AVAILABLE", // optional
+ *   "personalDetails": {
+ *     "fullName": "Jane Doe",
+ *     "email": "jane@example.com",
+ *     "phone": "07123 456789",
+ *     "address": "1 King St, London",
+ *     "dateOfBirth": "1990-03-01T00:00:00.000Z",
+ *     "nationalInsurance": "QQ123456C",
+ *     "employmentType": "CONTRACT",
+ *     "payrollNumber": "PR-0001"
+ *   }
+ * }
+ */
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json()
+
+    const { trade, status, personalDetails } = body ?? {}
+
+    if (!trade || !personalDetails?.fullName || !personalDetails?.email) {
+      return NextResponse.json(
+        { error: "Missing required fields: trade, personalDetails.fullName, personalDetails.email" },
+        { status: 400 },
+      )
+    }
+
+    const operative = await prisma.operative.create({
+      data: {
+        trade,
+        status, // defaults to AVAILABLE at DB level if omitted
+        personalDetails: {
+          create: {
+            fullName: personalDetails.fullName,
+            email: personalDetails.email,
+            phone: personalDetails.phone ?? "",
+            address: personalDetails.address ?? "",
+            dateOfBirth: personalDetails.dateOfBirth
+              ? new Date(personalDetails.dateOfBirth)
+              : new Date("1970-01-01"),
+            nationalInsurance: personalDetails.nationalInsurance ?? "",
+            employmentType: personalDetails.employmentType,
+            payrollNumber: personalDetails.payrollNumber ?? "",
+          },
+        },
+      },
+      include: {
+        personalDetails: true,
+        complianceCertificates: true,
+        workSites: true,
+      },
+    })
+
+    return NextResponse.json(operative, { status: 201 })
+  } catch (error) {
+    console.error("Error creating operative:", error)
+    return NextResponse.json({ error: "Failed to create operative" }, { status: 500 })
+  }
+}
+

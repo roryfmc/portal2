@@ -1,0 +1,663 @@
+"use client"
+
+import { useEffect, useState } from "react"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import {
+  User,
+  Users,
+  FileText,
+  Building,
+  Shield,
+  Calendar,
+  Edit,
+  Phone,
+  Mail,
+  MapPin,
+  Briefcase,
+  AlertTriangle,
+  CheckCircle,
+  Clock,
+  Download,
+  Trash2,
+} from "lucide-react"
+import type { Operative } from "@/lib/types"
+import { toast } from "@/components/ui/use-toast"
+
+interface OperativeCardProps {
+  operative: Operative
+  onEdit: () => void
+  onBack: () => void
+}
+
+export function OperativeCard({ operative, onEdit, onBack }: OperativeCardProps) {
+  const [activeTab, setActiveTab] = useState("personal")
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [isDeployedNow, setIsDeployedNow] = useState(false)
+
+  // Compute real-time deployment status based on current assignments
+  useEffect(() => {
+    let ignore = false
+    const load = async () => {
+      try {
+        const res = await fetch("/api/assignments", { cache: "no-store" })
+        if (!res.ok) return
+        const data = await res.json()
+        const now = new Date()
+        const deployed = (data as any[]).some(
+          (a) => String(a.operativeId) === String(operative.id) && new Date(a.startDate) <= now && new Date(a.endDate) >= now,
+        )
+        if (!ignore) setIsDeployedNow(deployed)
+      } catch {}
+    }
+    load()
+    return () => {
+      ignore = true
+    }
+  }, [operative.id])
+
+  const getInitials = (name?: string) =>
+    (name ?? "")
+      .split(" ")
+      .filter(Boolean)
+      .map((n) => n[0])
+      .join("")
+      .toUpperCase()
+      .slice(0, 2)
+
+  // Map schema enum to UI color/icon
+  // CertificateStatus: "VALID" | "EXPIRING_SOON" | "EXPIRED"
+  const getComplianceStatus = (certificate: { status?: string }) => {
+    switch (certificate.status) {
+      case "VALID":
+        return { icon: CheckCircle, color: "text-green-600", bg: "bg-green-100", badgeVariant: "default" as const }
+      case "EXPIRING_SOON":
+        return { icon: AlertTriangle, color: "text-orange-600", bg: "bg-orange-100", badgeVariant: "secondary" as const }
+      case "EXPIRED":
+        return { icon: AlertTriangle, color: "text-red-600", bg: "bg-red-100", badgeVariant: "secondary" as const }
+      default:
+        return { icon: Clock, color: "text-gray-600", bg: "bg-gray-100", badgeVariant: "secondary" as const }
+    }
+  }
+
+  const formatDate = (dateString?: string | null) => {
+    if (!dateString) return "—"
+    const d = new Date(dateString)
+    if (isNaN(d.getTime())) return "—"
+    return d.toLocaleDateString("en-GB", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    })
+  }
+
+  const handleDocumentDownload = (url?: string | null, filename?: string) => {
+    if (!url) return
+    const link = document.createElement("a")
+    link.href = url
+    link.download = filename || "document"
+    link.target = "_blank"
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+  }
+
+  const pd = operative.personalDetails
+  const rtw = operative.rightToWork
+  const nok = operative.nextOfKin
+  const avail = operative.availability
+  const certs = operative.complianceCertificates ?? []
+  const sites = operative.workSites ?? []
+  const timeOff = (operative as any).timeOffRequests ?? [] // if your lib/types includes it, this will be typed
+
+  const rightToWorkVerified = rtw?.status === "VERIFIED"
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <Button variant="ghost" onClick={onBack} className="text-primary hover:text-primary/80">
+          ← Back to Operatives
+        </Button>
+        <Button onClick={onEdit} className="bg-primary hover:bg-primary/90">
+          <Edit className="w-4 h-4 mr-2" />
+          Edit Operative
+        </Button>
+      </div>
+
+      {/* Operative Header Card */}
+      <Card>
+        <CardContent className="p-6">
+          <div className="flex items-center gap-6">
+            <Avatar className="w-20 h-20">
+              <AvatarFallback className="bg-primary/10 text-primary font-bold text-xl">
+                {getInitials(pd?.fullName)}
+              </AvatarFallback>
+            </Avatar>
+
+            <div className="flex-1">
+              <div className="flex items-center gap-3 mb-2">
+                <h1 className="text-2xl font-bold">{pd?.fullName ?? "Unnamed operative"}</h1>
+                <Badge variant="outline" className="text-sm">
+                  {pd?.payrollNumber ?? "—"}
+                </Badge>
+              </div>
+
+              <div className="flex items-center gap-2 mt-1">
+                <Badge variant={isDeployedNow ? "destructive" : "default"} className="text-sm">
+                  {isDeployedNow ? "Deployed" : "Available"}
+                </Badge>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                <div className="flex items-center gap-2">
+                  <Mail className="w-4 h-4 text-muted-foreground" />
+                  <span>{pd?.email ?? "—"}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Phone className="w-4 h-4 text-muted-foreground" />
+                  <span>{pd?.phone ?? "—"}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Briefcase className="w-4 h-4 text-muted-foreground" />
+                  <span className="capitalize">
+                    {pd?.employmentType ? pd.employmentType.toLowerCase() : "—"}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="text-right">
+              <div className="flex items-center gap-2 mb-2">
+                {rightToWorkVerified ? (
+                  <CheckCircle className="w-5 h-5 text-green-600" />
+                ) : (
+                  <AlertTriangle className="w-5 h-5 text-orange-600" />
+                )}
+                <span className="text-sm font-medium">{rtw?.status ?? "NOT_PROVIDED"}</span>
+              </div>
+              <p className="text-xs text-muted-foreground">Right to Work</p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Tabbed Content */}
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+        <TabsList className="grid w-full grid-cols-6">
+          <TabsTrigger value="personal" className="flex items-center gap-2">
+            <User className="w-4 h-4" />
+            <span className="hidden sm:inline">Personal</span>
+          </TabsTrigger>
+          <TabsTrigger value="nextofkin" className="flex items-center gap-2">
+            <Users className="w-4 h-4" />
+            <span className="hidden sm:inline">Next of Kin</span>
+          </TabsTrigger>
+          <TabsTrigger value="documents" className="flex items-center gap-2">
+            <FileText className="w-4 h-4" />
+            <span className="hidden sm:inline">Documents</span>
+          </TabsTrigger>
+          <TabsTrigger value="sites" className="flex items-center gap-2">
+            <Building className="w-4 h-4" />
+            <span className="hidden sm:inline">Work Sites</span>
+          </TabsTrigger>
+          <TabsTrigger value="compliance" className="flex items-center gap-2">
+            <Shield className="w-4 h-4" />
+            <span className="hidden sm:inline">Compliance</span>
+          </TabsTrigger>
+          <TabsTrigger value="availability" className="flex items-center gap-2">
+            <Calendar className="w-4 h-4" />
+            <span className="hidden sm:inline">Availability</span>
+          </TabsTrigger>
+        </TabsList>
+
+        {/* Personal Details Tab */}
+        <TabsContent value="personal">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <User className="w-5 h-5" />
+                Personal Details
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-sm font-medium text-muted-foreground">Full Name</label>
+                    <p className="text-lg font-medium">{pd?.fullName ?? "—"}</p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-muted-foreground">Email Address</label>
+                    <p className="text-lg">{pd?.email ?? "—"}</p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-muted-foreground">Phone Number</label>
+                    <p className="text-lg">{pd?.phone ?? "—"}</p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-muted-foreground">Date of Birth</label>
+                    <p className="text-lg">{formatDate(pd?.dateOfBirth)}</p>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-sm font-medium text-muted-foreground">Address</label>
+                    <p className="text-lg">{pd?.address ?? "—"}</p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-muted-foreground">National Insurance</label>
+                    <p className="text-lg font-mono">{pd?.nationalInsurance ?? "—"}</p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-muted-foreground">Employment Type</label>
+                    <p className="text-lg capitalize">{pd?.employmentType?.toLowerCase() ?? "—"}</p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-muted-foreground">Payroll Number</label>
+                    <p className="text-lg font-mono">{pd?.payrollNumber ?? "—"}</p>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Next of Kin Tab */}
+        <TabsContent value="nextofkin">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Users className="w-5 h-5" />
+                Emergency Contact
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {nok ? (
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="space-y-4">
+                      <div>
+                        <label className="text-sm font-medium text-muted-foreground">Contact Name</label>
+                        <p className="text-lg font-medium">{nok.name}</p>
+                      </div>
+                      <div>
+                        <label className="text-sm font-medium text-muted-foreground">Relationship</label>
+                        <p className="text-lg capitalize">{nok.relationship}</p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-4">
+                      <div>
+                        <label className="text-sm font-medium text-muted-foreground">Phone Number</label>
+                        <p className="text-lg">{nok.phone}</p>
+                      </div>
+                      {nok.email && (
+                        <div>
+                          <label className="text-sm font-medium text-muted-foreground">Email Address</label>
+                          <p className="text-lg">{nok.email}</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-sm font-medium text-muted-foreground">Address</label>
+                    <p className="text-lg">{nok.address}</p>
+                  </div>
+                </>
+              ) : (
+                <p className="text-muted-foreground">No next of kin recorded</p>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Documents / Right to Work Tab */}
+        <TabsContent value="documents">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <FileText className="w-5 h-5" />
+                Right to Work Documentation
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {rtw ? (
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div>
+                      <label className="text-sm font-medium text-muted-foreground">Country</label>
+                      <p className="text-lg font-medium">{rtw.country}</p>
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium text-muted-foreground">Status</label>
+                      <div className="flex items-center gap-2 mt-1">
+                        {rtw.status === "VERIFIED" ? (
+                          <CheckCircle className="w-5 h-5 text-green-600" />
+                        ) : (
+                          <AlertTriangle className="w-5 h-5 text-orange-600" />
+                        )}
+                        <Badge
+                          variant={rtw.status === "VERIFIED" ? "default" : "secondary"}
+                          className={rtw.status === "VERIFIED" ? "bg-green-100 text-green-800" : ""}
+                        >
+                          {rtw.status}
+                        </Badge>
+                      </div>
+                    </div>
+                    {rtw.expiryDate && (
+                      <div>
+                        <label className="text-sm font-medium text-muted-foreground">Expiry Date</label>
+                        <p className="text-lg">{formatDate(rtw.expiryDate)}</p>
+                      </div>
+                    )}
+                  </div>
+
+                  {rtw.documentUrl ? (
+                    <div className="border-2 border-dashed border-green-200 bg-green-50 rounded-lg p-6">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <FileText className="w-8 h-8 text-green-600" />
+                          <div>
+                            <p className="font-medium text-green-900">Right to Work Document</p>
+                            <p className="text-sm text-green-700">Document uploaded and available</p>
+                          </div>
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleDocumentDownload(rtw.documentUrl, "right-to-work-document")}
+                          className="border-green-300 text-green-700 hover:bg-green-100"
+                        >
+                          <Download className="w-4 h-4 mr-2" />
+                          Download
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="border-2 border-dashed border-border rounded-lg p-6 text-center">
+                      <FileText className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+                      <p className="text-muted-foreground">No document uploaded</p>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <p className="text-muted-foreground">No right to work record</p>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Work Sites Tab */}
+        <TabsContent value="sites">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Building className="w-5 h-5" />
+                Previous Work Sites
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {sites.length > 0 ? (
+                <div className="space-y-4">
+                  {sites.map((site) => (
+                    <div key={site.id} className="border rounded-lg p-4">
+                      <div className="flex items-start justify-between mb-3">
+                        <div>
+                          <h3 className="font-semibold text-lg">{site.siteName}</h3>
+                          <p className="text-muted-foreground flex items-center gap-1">
+                            <MapPin className="w-4 h-4" />
+                            {site.location}
+                          </p>
+                        </div>
+                        <Badge variant="outline">{(site as any).role ?? "—"}</Badge>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                        <div>
+                          <label className="text-muted-foreground">Contractor</label>
+                          <p className="font-medium">{(site as any).contractor ?? "—"}</p>
+                        </div>
+                        <div>
+                          <label className="text-muted-foreground">Start Date</label>
+                          <p className="font-medium">{formatDate(site.startDate as any)}</p>
+                        </div>
+                        <div>
+                          <label className="text-muted-foreground">End Date</label>
+                          <p className="font-medium">
+                            {(site as any).endDate ? formatDate((site as any).endDate) : "Ongoing"}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-12">
+                  <Building className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+                  <p className="text-muted-foreground">No previous work sites recorded</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Compliance Tab */}
+        <TabsContent value="compliance">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Shield className="w-5 h-5" />
+                Compliance Certificates
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {certs.length > 0 ? (
+                <div className="space-y-4">
+                  {certs.map((cert) => {
+                    const status = getComplianceStatus(cert)
+                    const StatusIcon = status.icon
+                    return (
+                      <div key={cert.id} className="border rounded-lg p-4">
+                        <div className="flex items-start justify-between mb-3">
+                          <div className="flex-1">
+                            <h3 className="font-semibold text-lg">{cert.name}</h3>
+                            <p className="text-muted-foreground">Issued by {cert.issuer}</p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <div className={`p-2 rounded-lg ${status.bg}`}>
+                              <StatusIcon className={`w-4 h-4 ${status.color}`} />
+                            </div>
+                            <Badge
+                              variant={status.badgeVariant}
+                              className={cert.status === "VALID" ? "bg-green-100 text-green-800" : ""}
+                            >
+                              {cert.status}
+                            </Badge>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm mb-4">
+                          <div>
+                            <label className="text-muted-foreground">Issue Date</label>
+                            <p className="font-medium">{formatDate(cert.issueDate as any)}</p>
+                          </div>
+                          <div>
+                            <label className="text-muted-foreground">Expiry Date</label>
+                            <p className="font-medium">{formatDate(cert.expiryDate as any)}</p>
+                          </div>
+                        </div>
+
+                        {cert.documentUrl && (
+                          <div className="border border-green-200 bg-green-50 rounded-lg p-3">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <FileText className="w-5 h-5 text-green-600" />
+                                <span className="text-sm font-medium text-green-900">Certificate Document</span>
+                              </div>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleDocumentDownload(cert.documentUrl!, `${cert.name}-certificate`)}
+                                className="border-green-300 text-green-700 hover:bg-green-100"
+                              >
+                                <Download className="w-4 h-4 mr-1" />
+                                Download
+                              </Button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              ) : (
+                <div className="text-center py-12">
+                  <Shield className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+                  <p className="text-muted-foreground">No compliance certificates recorded</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Availability Tab */}
+        <TabsContent value="availability">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Calendar className="w-5 h-5" />
+                Availability & Time Off
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {/* Work Schedule */}
+              <div>
+                <h3 className="font-semibold mb-4">Work Schedule</h3>
+                {avail ? (
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="flex items-center gap-2">
+                      <div className={`w-3 h-3 rounded-full ${avail.mondayToFriday ? "bg-green-500" : "bg-gray-300"}`} />
+                      <span className="text-sm">Monday - Friday</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className={`w-3 h-3 rounded-full ${avail.saturday ? "bg-green-500" : "bg-gray-300"}`} />
+                      <span className="text-sm">Saturday</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className={`w-3 h-3 rounded-full ${avail.sunday ? "bg-green-500" : "bg-gray-300"}`} />
+                      <span className="text-sm">Sunday</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className={`w-3 h-3 rounded-full ${avail.nightShifts ? "bg-green-500" : "bg-gray-300"}`} />
+                      <span className="text-sm">Night Shifts</span>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-muted-foreground">No availability record</p>
+                )}
+              </div>
+
+              {/* Time Off Requests (belongs to Operative, not Availability) */}
+              <div>
+                <h3 className="font-semibold mb-4">Time Off Requests</h3>
+                {timeOff.length > 0 ? (
+                  <div className="space-y-3">
+                    {timeOff.map((request: any) => (
+                      <div key={request.id} className="border rounded-lg p-4">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="font-medium">
+                            {formatDate(request.startDate)} - {formatDate(request.endDate)}
+                          </span>
+                          <Badge
+                            variant={request.status === "APPROVED" ? "default" : "secondary"}
+                            className={
+                              request.status === "APPROVED"
+                                ? "bg-green-100 text-green-800"
+                                : request.status === "REJECTED"
+                                  ? "bg-red-100 text-red-800"
+                                  : ""
+                            }
+                          >
+                            {request.status}
+                          </Badge>
+                        </div>
+                        <p className="text-sm text-muted-foreground">{request.reason}</p>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-muted-foreground">No time off requests</p>
+                )}
+              </div>
+
+              {/* Unavailable Dates */}
+              {avail?.unavailableDates && avail.unavailableDates.length > 0 && (
+                <div>
+                  <h3 className="font-semibold mb-4">Unavailable Dates</h3>
+                  <div className="flex flex-wrap gap-2">
+                    {avail.unavailableDates.map((date, index) => (
+                      <Badge key={index} variant="outline">
+                        {formatDate(date as unknown as string)}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
+
+      {/* Danger Zone */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-red-600">Danger Zone</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground mb-3">
+            Deleting this operative will remove their records and cannot be undone.
+          </p>
+          <Button
+            variant="destructive"
+            onClick={async () => {
+              if (isDeleting) return
+              const ok = window.confirm(
+                `Delete operative ${operative.personalDetails?.fullName || operative.id}? This cannot be undone.`,
+              )
+              if (!ok) return
+              try {
+                setIsDeleting(true)
+                const res = await fetch(`/api/operatives/${operative.id}`, { method: "DELETE" })
+                if (!res.ok) {
+                  const msg = (await res.json().catch(() => null))?.error || `Failed (HTTP ${res.status})`
+                  throw new Error(msg)
+                }
+                toast({ title: "Operative deleted" })
+                try {
+                  window.dispatchEvent(new Event("storage"))
+                } catch {}
+                onBack()
+              } catch (e: any) {
+                toast({ title: "Failed to delete operative", description: e?.message || "Unknown error" })
+                console.error(e)
+              } finally {
+                setIsDeleting(false)
+              }
+            }}
+            disabled={isDeleting}
+            className="disabled:opacity-60"
+          >
+            <Trash2 className="w-4 h-4 mr-2" />
+            {isDeleting ? "Deleting..." : "Delete Operative"}
+          </Button>
+        </CardContent>
+      </Card>
+    </div>
+  )
+}

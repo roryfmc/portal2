@@ -5,6 +5,7 @@ export async function GET() {
   try {
     const assignments = await prisma.siteOperative.findMany({
       include: { operative: true, site: true },
+      orderBy: { id: "desc" },
     })
     return NextResponse.json(assignments)
   } catch (err) {
@@ -24,14 +25,15 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 })
     }
 
+    // IDs are UUID strings in the schema. Do NOT cast to Number.
     const created = await prisma.siteOperative.create({
       data: {
-        operativeId: Number(operativeId),
-        siteId: Number(siteId),
+        operativeId: String(operativeId),
+        siteId: String(siteId),
         startDate: new Date(startDate),
         endDate: new Date(endDate),
       },
-      include: { operative: true },
+      include: { operative: true, site: true },
     })
 
     return NextResponse.json(created)

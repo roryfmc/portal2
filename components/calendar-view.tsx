@@ -5,10 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { ChevronLeft, ChevronRight, Plus, Clock, Video, Phone, MapPin } from "lucide-react"
-import { mockSiteAssignments, mockOperatives, mockManagers } from "@/lib/data"
-import { getStoredAppointments, saveAppointment } from "@/lib/storage"
-import { AppointmentBookingModal } from "./appointment-booking-modal"
-import type { Appointment, ConstructionSite, Operative } from "@/lib/types"
+import type {ConstructionSite, Operative } from "@/lib/types"
 
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
 const MONTHS = [
@@ -30,16 +27,11 @@ export function CalendarView() {
   const [currentDate, setCurrentDate] = useState(new Date())
   const [selectedDate, setSelectedDate] = useState<Date | null>(null)
   const [showBookingModal, setShowBookingModal] = useState(false)
-  const [appointments, setAppointments] = useState<Appointment[]>([])
   const [sites, setSites] = useState<ConstructionSite[]>([])
   const [loadingSites, setLoadingSites] = useState(false)
   const [operatives, setOperatives] = useState<Operative[]>([])
   const [loadingOperatives, setLoadingOperatives] = useState(false)
 
-  useEffect(() => {
-    const storedAppointments = getStoredAppointments()
-    setAppointments([...mockSiteAssignments, ...storedAppointments])
-  }, [])
 
   useEffect(() => {
     const fetchSites = async () => {
@@ -85,10 +77,6 @@ export function CalendarView() {
     fetchOperatives()
   }, [])
 
-  const handleAppointmentCreated = (newAppointment: Appointment) => {
-    saveAppointment(newAppointment)
-    setAppointments((prev) => [...prev, newAppointment])
-  }
 
   const year = currentDate.getFullYear()
   const month = currentDate.getMonth()
@@ -109,14 +97,6 @@ export function CalendarView() {
       return newDate
     })
   }
-
-  const getAppointmentsForDate = (date: Date): Appointment[] => {
-    return appointments.filter((apt) => {
-      const aptDate = new Date(apt.startTime)
-      return aptDate.toDateString() === date.toDateString()
-    })
-  }
-
   const getTypeIcon = (type: string) => {
     switch (type) {
       case "video":
@@ -354,12 +334,6 @@ export function CalendarView() {
         </div>
       </div>
 
-      <AppointmentBookingModal
-        open={showBookingModal}
-        onOpenChange={setShowBookingModal}
-        selectedDate={selectedDate || undefined}
-        onAppointmentCreated={handleAppointmentCreated}
-      />
     </div>
   )
 }

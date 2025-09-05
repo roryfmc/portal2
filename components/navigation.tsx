@@ -14,7 +14,6 @@ export function Navigation({ activeTab, onTabChange }: NavigationProps) {
     { id: "sites", label: "Sites", icon: Building2 },
     { id: "clients", label: "Clients", icon: Users },
     { id: "dashboard", label: "Dashboard", icon: BarChart3 },
-    { id: "notifications", label: "Notifications", icon: Mail },
   ]
 
   return (

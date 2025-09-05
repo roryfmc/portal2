@@ -1,22 +1,50 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { prisma } from "../../../../lib/prisma"
+import { Prisma } from "@prisma/client"
 
 // PUT (unchanged conceptually; keep Number() because id is Int)
 export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
   try {
     const body = await request.json()
-    const { name, email, phone, company, contactPerson } = body
+    const { name, email, phone, company, contactPerson, jobTypes } = body
 
-    const client = await prisma.client.update({
-      where: { id: Number(params.id) },
+    const id = Number(params.id)
+
+    const updates = await prisma.client.update({
+      where: { id },
       data: {
-        name,
-        email,
-        phone: phone ?? null,            // ok because phone is optional
-        company,                         // required in your model
-        contactPerson,                   // required in your model
+        ...(name ? { name } : {}),
+        ...(email ? { email } : {}),
+        ...(typeof phone !== "undefined" ? { phone: phone ?? null } : {}),
+        ...(company ? { company } : {}),
+        ...(contactPerson ? { contactPerson } : {}),
       },
-      include: { sites: true },
+    })
+
+    if (Array.isArray(jobTypes)) {
+      // Replace existing job types with provided list
+      await prisma.$transaction([
+        prisma.clientJobType.deleteMany({ where: { clientId: id } }),
+        ...(jobTypes.length
+          ? [
+              prisma.clientJobType.createMany({
+                data: jobTypes
+                  .filter((j: any) => j?.name)
+                  .map((j: any) => ({
+                    clientId: id,
+                    name: String(j.name),
+                    payRate: new Prisma.Decimal(j.payRate ?? 0),
+                    clientCost: new Prisma.Decimal(j.clientCost ?? 0),
+                  })),
+              }),
+            ]
+          : []),
+      ])
+    }
+
+    const client = await prisma.client.findUnique({
+      where: { id },
+      include: { sites: true, jobTypes: true },
     })
 
     return NextResponse.json(client)

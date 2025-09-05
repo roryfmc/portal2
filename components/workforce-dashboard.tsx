@@ -64,7 +64,7 @@ export function WorkforceDashboard() {
 
   const getOperativeName = (operativeId: string | number) => {
     const op = operatives.find((o) => String(o.id) === String(operativeId))
-    return op?.name || "Unknown Operative"
+    return op?.personalDetails?.fullName || String(op?.id ?? "") || "Unknown Operative"
   }
 
   const getSiteName = (siteId: string | number) => {
@@ -72,18 +72,18 @@ export function WorkforceDashboard() {
     return s?.name || "Unknown Site"
   }
 
-  const getStatusBadge = (derived: string) => {
-    switch (derived) {
-      case "active":
-        return "bg-green-100 text-green-800"
-      case "upcoming":
-        return "bg-blue-100 text-blue-800"
-      case "completed":
-        return "bg-gray-100 text-gray-800"
-      default:
-        return "bg-gray-100 text-gray-800"
-    }
+  const isOperativeDeployedNow = (operativeId: string | number) => {
+    const nowTs = new Date()
+    return (assignments || []).some((a: any) => {
+      if (String(a.operativeId) !== String(operativeId)) return false
+      const s = new Date(a.startDate)
+      const e = new Date(a.endDate)
+      return s <= nowTs && e >= nowTs
+    })
   }
+
+  const getDeploymentBadgeClass = (deployed: boolean) =>
+    deployed ? "bg-red-100 text-red-800" : "bg-green-100 text-green-800"
 
   return (
     <div className="space-y-6">
@@ -161,7 +161,14 @@ export function WorkforceDashboard() {
                     </p>
                   </div>
                   <div className="text-right">
-                    <Badge className={getStatusBadge(assignment.derivedStatus)}>{assignment.derivedStatus}</Badge>
+                    {(() => {
+                      const deployed = isOperativeDeployedNow(assignment.operativeId)
+                      return (
+                        <Badge className={getDeploymentBadgeClass(deployed)}>
+                          {deployed ? "Deployed" : "Available"}
+                        </Badge>
+                      )
+                    })()}
                   </div>
                 </div>
               ))
@@ -192,7 +199,14 @@ export function WorkforceDashboard() {
                     <p className="text-sm text-muted-foreground">{getSiteName(assignment.siteId)}</p>
                     <p className="text-xs text-muted-foreground">Start {new Date(assignment.startDate).toLocaleDateString()}</p>
                   </div>
-                  <Badge className={getStatusBadge(assignment.derivedStatus)}>{assignment.derivedStatus}</Badge>
+                  {(() => {
+                    const deployed = isOperativeDeployedNow(assignment.operativeId)
+                    return (
+                      <Badge className={getDeploymentBadgeClass(deployed)}>
+                        {deployed ? "Deployed" : "Available"}
+                      </Badge>
+                    )
+                  })()}
                 </div>
               ))
             ) : (
@@ -216,40 +230,35 @@ export function WorkforceDashboard() {
         </CardHeader>
         <CardContent>
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {operatives.map((operative) => (
-              <div key={operative.id} className="flex items-center justify-between p-3 border rounded-lg">
-                <div className="space-y-1">
-                  <p className="font-medium">{operative.name}</p>
-                  <p className="text-sm text-muted-foreground">{operative.trade}</p>
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <Mail className="h-3 w-3" />
-                    <span>{operative.email}</span>
-                  </div>
-                  {operative.phone && (
+            {operatives.map((operative) => {
+              const deployed = isOperativeDeployedNow(operative.id)
+              const pd = operative.personalDetails
+              return (
+                <div key={operative.id} className="flex items-center justify-between p-3 border rounded-lg">
+                  <div className="space-y-1">
+                    <p className="font-medium">{pd?.fullName ?? "Unnamed operative"}</p>
+                    {operative.trade && (
+                      <p className="text-sm text-muted-foreground">{operative.trade}</p>
+                    )}
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <Phone className="h-3 w-3" />
-                      <span>{operative.phone}</span>
+                      <Mail className="h-3 w-3" />
+                      <span>{pd?.email ?? ""}</span>
                     </div>
-                  )}
+                    {pd?.phone && (
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <Phone className="h-3 w-3" />
+                        <span>{pd.phone}</span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="text-right">
+                    <Badge className={getDeploymentBadgeClass(deployed)}>
+                      {deployed ? "Deployed" : "Available"}
+                    </Badge>
+                  </div>
                 </div>
-                <div className="text-right">
-                  <Badge
-                    className={
-                      operative.status === "available"
-                        ? "bg-green-100 text-green-800"
-                        : operative.status === "deployed"
-                          ? "bg-blue-100 text-blue-800"
-                          : operative.status === "on-leave"
-                            ? "bg-yellow-100 text-yellow-800"
-                            : "bg-red-100 text-red-800"
-                    }
-                  >
-                    {operative.status}
-                  </Badge>
-                  
-                </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         </CardContent>
       </Card>
@@ -284,4 +293,3 @@ export function WorkforceDashboard() {
     </div>
   )
 }
-

@@ -21,8 +21,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Plus, Search, Edit, Trash2, Building2, MapPin, Calendar, Users } from "lucide-react"
-import { mockConstructionSites, mockClients } from "@/lib/data"
+import { Plus, Search, Edit, Trash2, Building2, MapPin, Calendar, Users, CheckCircle } from "lucide-react"
 import type { ConstructionSite, Operative, SiteAssignment, Client } from "@/lib/types"
 import { toast } from "@/components/ui/use-toast"
 
@@ -37,6 +36,11 @@ export function SiteManagement() {
 
   const [operativeSearchTerm, setOperativeSearchTerm] = useState("")
   const [selectedOperatives, setSelectedOperatives] = useState<string[]>([])
+  const [availabilityFilter, setAvailabilityFilter] = useState<"all" | "available" | "deployed">("all")
+  const [complianceFilter, setComplianceFilter] = useState<"all" | "compliant" | "attention">("all")
+  const [geoCache, setGeoCache] = useState<Record<string, { lat: number; lng: number }>>({})
+  const [distanceMap, setDistanceMap] = useState<Record<string, number>>({})
+  const OPENCAGE_KEY = process.env.NEXT_PUBLIC_OPENCAGE_API_KEY as string | undefined
 
   const [formData, setFormData] = useState({
     name: "",
@@ -126,6 +130,22 @@ export function SiteManagement() {
     })
   }
 
+  const isOperativeDeployedForCurrentRange = (operativeId: string) => {
+    // Determine target range from form (if provided) or the editing site dates
+    const start = formData.startDate ? new Date(formData.startDate) : editingSite?.startDate
+    const end = formData.endDate ? new Date(formData.endDate) : editingSite?.endDate
+    if (start && end) {
+      return assignments.some((a: any) => {
+        const aStart = new Date(a.startDate)
+        const aEnd = new Date(a.endDate)
+        // Overlap check: aStart <= end && start <= aEnd
+        return String(a.operativeId) === String(operativeId) && aStart <= end && start <= aEnd
+      })
+    }
+    // Fallback to now-based status when no dates are set yet
+    return isOperativeDeployedNow(operativeId)
+  }
+
   const handleOperativeAssignment = async () => {
     if (!editingSite) return
 
@@ -177,11 +197,103 @@ export function SiteManagement() {
       site.projectType.toLowerCase().includes(searchTerm.toLowerCase()),
   )
 
-  const filteredOperatives = operatives.filter(
-    (operative) =>
-      operative.name.toLowerCase().includes(operativeSearchTerm.toLowerCase()) ||
-      operative.trade.toLowerCase().includes(operativeSearchTerm.toLowerCase()),
-  )
+  // Determine compliance status
+  const getComplianceStatus = (operative: Operative) => {
+    const list = operative.complianceCertificates ?? []
+    if (list.length === 0) return "error" as const
+    const hasRisk = list.some((c: any) => c.status === "EXPIRING_SOON" || c.status === "EXPIRED")
+    return (hasRisk ? "warning" : "success") as const
+  }
+
+  const filteredOperatives = operatives.filter((operative) => {
+    const q = operativeSearchTerm.toLowerCase()
+    const name = operative.personalDetails?.fullName?.toLowerCase() || ""
+    const trade = (operative.trade || "").toLowerCase()
+    const id = operative.id?.toLowerCase() || ""
+    const matchesText = name.includes(q) || trade.includes(q) || id.includes(q)
+
+    const isDep = isOperativeDeployedForCurrentRange(operative.id)
+    const matchesAvail =
+      availabilityFilter === "all" ||
+      (availabilityFilter === "available" && !isDep) ||
+      (availabilityFilter === "deployed" && isDep)
+
+    const compliant = getComplianceStatus(operative) === "success"
+    const matchesComp =
+      complianceFilter === "all" ||
+      (complianceFilter === "compliant" && compliant) ||
+      (complianceFilter === "attention" && !compliant)
+
+    return matchesText && matchesAvail && matchesComp
+  })
+
+  // Geocoding and distance helpers
+  const geocode = async (address: string): Promise<{ lat: number; lng: number } | null> => {
+    if (!address) return null
+    if (geoCache[address]) return geoCache[address]
+    try {
+      if (!OPENCAGE_KEY) return null
+      const url = `https://api.opencagedata.com/geocode/v1/json?q=${encodeURIComponent(address)}&key=${OPENCAGE_KEY}`
+      const res = await fetch(url)
+      if (!res.ok) return null
+      const data = await res.json()
+      const g = data?.results?.[0]?.geometry
+      if (g?.lat && g?.lng) {
+        const coords = { lat: g.lat, lng: g.lng }
+        setGeoCache((prev) => ({ ...prev, [address]: coords }))
+        return coords
+      }
+    } catch (e) {
+      console.error("Geocoding failed", e)
+    }
+    return null
+  }
+
+  const haversine = (a: { lat: number; lng: number }, b: { lat: number; lng: number }) => {
+    const toRad = (x: number) => (x * Math.PI) / 180
+    const R = 6371 // km
+    const dLat = toRad(b.lat - a.lat)
+    const dLon = toRad(b.lng - a.lng)
+    const lat1 = toRad(a.lat)
+    const lat2 = toRad(b.lat)
+    const h =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) * Math.sin(dLon / 2)
+    const c = 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h))
+    return R * c
+  }
+
+  useEffect(() => {
+    let cancelled = false
+    const run = async () => {
+      const siteAddr = formData.address || editingSite?.address
+      if (!siteAddr) return
+      const sCoords = await geocode(siteAddr)
+      if (!sCoords) return
+      for (const op of filteredOperatives) {
+        const addr = op.personalDetails?.address
+        if (!addr) continue
+        if (distanceMap[op.id]) continue
+        const oCoords = await geocode(addr)
+        if (!oCoords) continue
+        const dist = haversine(sCoords, oCoords)
+        if (!cancelled) setDistanceMap((prev) => ({ ...prev, [op.id]: dist }))
+      }
+    }
+    run()
+    return () => {
+      cancelled = true
+    }
+  }, [filteredOperatives, formData.address, editingSite])
+
+  // Derived stats
+  const totalSites = sites.length
+  const fullyFulfilledCount = (() => {
+    return sites.reduce((acc, site) => {
+      const assigned = assignments.filter((a) => a.siteId === site.id).length
+      return acc + (site.maxOperatives > 0 && assigned >= site.maxOperatives ? 1 : 0)
+    }, 0)
+  })()
 
   const handleSubmit = async (e: React.FormEvent) => {
   e.preventDefault()
@@ -376,20 +488,21 @@ export function SiteManagement() {
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="projectType">Project Type</Label>
+                    <Label htmlFor="projectType">Job Type</Label>
                     <Select
                       value={formData.projectType}
                       onValueChange={(value) => setFormData({ ...formData, projectType: value })}
+                      disabled={!formData.clientId}
                     >
                       <SelectTrigger>
-                        <SelectValue placeholder="Select project type" />
+                        <SelectValue placeholder={formData.clientId ? "Select job type" : "Select a client first"} />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="Residential Development">Residential Development</SelectItem>
-                        <SelectItem value="Commercial Office Building">Commercial Office Building</SelectItem>
-                        <SelectItem value="Industrial Facility">Industrial Facility</SelectItem>
-                        <SelectItem value="Infrastructure">Infrastructure</SelectItem>
-                        <SelectItem value="Renovation">Renovation</SelectItem>
+                        {(clients.find((c) => String(c.id) === String(formData.clientId))?.jobTypes || []).map((jt) => (
+                          <SelectItem key={jt.id} value={jt.name}>
+                            {jt.name}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </div>
@@ -449,13 +562,41 @@ export function SiteManagement() {
 
               <TabsContent value="operatives" className="space-y-4">
                 <div className="space-y-4">
-                  <div className="flex items-center space-x-2">
-                    <Search className="h-4 w-4 text-muted-foreground" />
-                    <Input
-                      placeholder="Search operatives by name or trade..."
-                      value={operativeSearchTerm}
-                      onChange={(e) => setOperativeSearchTerm(e.target.value)}
-                    />
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+                    <div className="space-y-1">
+                      <Label htmlFor="avail">Availability</Label>
+                      <Select value={availabilityFilter} onValueChange={(v) => setAvailabilityFilter(v as any)}>
+                        <SelectTrigger id="avail">
+                          <SelectValue placeholder="All" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All</SelectItem>
+                          <SelectItem value="available">Available</SelectItem>
+                          <SelectItem value="deployed">Deployed</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="comp">Compliance</Label>
+                      <Select value={complianceFilter} onValueChange={(v) => setComplianceFilter(v as any)}>
+                        <SelectTrigger id="comp">
+                          <SelectValue placeholder="All" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All</SelectItem>
+                          <SelectItem value="compliant">Compliant</SelectItem>
+                          <SelectItem value="attention">Needs Attention</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <Search className="h-4 w-4 text-muted-foreground" />
+                      <Input
+                        placeholder="Search operatives by name or trade..."
+                        value={operativeSearchTerm}
+                        onChange={(e) => setOperativeSearchTerm(e.target.value)}
+                      />
+                    </div>
                   </div>
 
                   <div className="max-h-60 overflow-y-auto space-y-2">
@@ -478,9 +619,10 @@ export function SiteManagement() {
                                 })
                                 return
                               }
-                              if (isOperativeDeployedNow(operative.id)) {
+                              if (isOperativeDeployedForCurrentRange(operative.id)) {
+                                const displayName = operative.personalDetails?.fullName || operative.id
                                 const ok = window.confirm(
-                                  `${operative.name} is currently deployed on another site. Assign to multiple sites?`
+                                  `${displayName} is already assigned during this timeframe. Assign to multiple sites?`
                                 )
                                 if (!ok) return
                               }
@@ -491,14 +633,21 @@ export function SiteManagement() {
                           }}
                         />
                         <div className="flex-1">
-                          <p className="font-medium">{operative.name}</p>
+                          <p className="font-medium">{operative.personalDetails?.fullName ?? operative.id}</p>
                           <p className="text-sm text-muted-foreground">
-                            {operative.trade} • £{operative.hourlyRate}/hr
+                            {operative.trade}
                           </p>
                         </div>
-                        <Badge variant={isOperativeDeployedNow(operative.id) ? "destructive" : "default"}>
-                          {isOperativeDeployedNow(operative.id) ? "Deployed" : "Available"}
-                        </Badge>
+                        <div className="flex items-center gap-3">
+                          {distanceMap[operative.id] && (
+                            <span className="text-xs text-muted-foreground">
+                              {distanceMap[operative.id].toFixed(1)} km away
+                            </span>
+                          )}
+                          <Badge variant={isOperativeDeployedForCurrentRange(operative.id) ? "destructive" : "default"}>
+                            {isOperativeDeployedForCurrentRange(operative.id) ? "Deployed" : "Available"}
+                          </Badge>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -518,6 +667,37 @@ export function SiteManagement() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+      </div>
+
+      {/* Stats Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <Card>
+          <CardContent className="p-6">
+            <div className="flex items-center gap-4">
+              <div className="p-3 bg-primary/10 rounded-lg">
+                <Building2 className="w-6 h-6 text-primary" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold">{totalSites}</p>
+                <p className="text-sm text-muted-foreground">Total Sites</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-6">
+            <div className="flex items-center gap-4">
+              <div className="p-3 bg-green-100 rounded-lg">
+                <CheckCircle className="w-6 h-6 text-green-700" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold">{fullyFulfilledCount}</p>
+                <p className="text-sm text-muted-foreground">Fully Fulfilled</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       {/* ... existing search input ... */}
@@ -583,11 +763,14 @@ export function SiteManagement() {
                   </div>
                   {assignedOperatives.length > 0 ? (
                     <div className="flex flex-wrap gap-1">
-                      {assignedOperatives.slice(0, 3).map((operative) => (
-                        <Badge key={operative.id} variant="outline" className="text-xs">
-                          {operative.name}
-                        </Badge>
-                      ))}
+                      {assignedOperatives.slice(0, 3).map((operative) => {
+                        const name = operative.personalDetails?.fullName || operative.id
+                        return (
+                          <Badge key={operative.id} variant="outline" className="text-xs">
+                            {name}
+                          </Badge>
+                        )
+                      })}
                       {assignedOperatives.length > 3 && (
                         <Badge variant="outline" className="text-xs">
                           +{assignedOperatives.length - 3} more

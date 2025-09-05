@@ -4,7 +4,7 @@ import { prisma } from "../../../../lib/prisma"
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
   try {
     const site = await prisma.constructionSite.findUnique({
-      where: { id: Number(params.id) },
+      where: { id: String(params.id) },
       include: {
         operatives: {           // include the join table entries
           include: { operative: true } // include full operative details
@@ -29,18 +29,25 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     const { name, address, clientId, projectType, startDate, endDate, requiredTrades, maxOperatives } = body
 
     const site = await prisma.constructionSite.update({
-      where: { id: Number(params.id) },
+      where: { id: String(params.id) },
       data: {
-        name,
-        address,
-        clientId,
-        projectType,
-        startDate: new Date(startDate),
-        endDate: new Date(endDate),
-        requiredTrades: Array.isArray(requiredTrades)
-          ? requiredTrades
-          : requiredTrades.split(",").map((t: string) => t.trim()),
-        maxOperatives: Number(maxOperatives),
+        ...(name ? { name } : {}),
+        ...(address ? { address } : {}),
+        ...(clientId ? { clientId: Number(clientId) } : {}),
+        ...(projectType ? { projectType } : {}),
+        ...(startDate ? { startDate: new Date(startDate) } : {}),
+        ...(endDate ? { endDate: new Date(endDate) } : {}),
+        ...(typeof requiredTrades !== "undefined"
+          ? {
+              requiredTrades: Array.isArray(requiredTrades)
+                ? requiredTrades
+                : String(requiredTrades)
+                    .split(",")
+                    .map((t: string) => t.trim())
+                    .filter(Boolean),
+            }
+          : {}),
+        ...(typeof maxOperatives !== "undefined" ? { maxOperatives: Number(maxOperatives) } : {}),
       },
     })
 
@@ -53,7 +60,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
 
 export async function DELETE(request: NextRequest, { params }: { params: { id: string } }) {
   try {
-    const id = Number(params.id)
+    const id = String(params.id)
 
     // Remove assigned operatives first, then delete site
     await prisma.$transaction([

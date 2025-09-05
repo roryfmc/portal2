@@ -1,14 +1,88 @@
-// import { SiteOperative } from "@prisma/client"
+
+export type EmploymentType = "SELF_EMPLOYED" | "CONTRACT" | "TEMPORARY"
+export type CertificateStatus = "VALID" | "EXPIRING_SOON" | "EXPIRED"
+// Operative status is now derived from assignments; keep the union if needed elsewhere
+export type OperativeStatus = "AVAILABLE" | "DEPLOYED" | "ON_LEAVE" | "UNAVAILABLE"
+
+export interface PersonalDetails {
+  id: string
+  fullName: string
+  email: string
+  phone: string
+  address: string
+  dateOfBirth: string
+  nationalInsurance: string
+  employmentType: EmploymentType
+  payrollNumber: string
+  operativeId: string
+}
+
+export interface ComplianceCertificate {
+  id: string
+  name: string
+  issuer: string
+  issueDate: string
+  expiryDate: string
+  status: CertificateStatus
+  documentUrl?: string | null
+  operativeId: string
+}
+
+export interface WorkSite {
+  id: string
+  siteName: string
+  location: string
+  startDate: string
+  endDate?: string | null
+  role: string
+  contractor: string
+  operativeId: string
+}
 
 export interface Operative {
   id: string
-  name: string
-  email: string
-  phone?: string
-  trade: string // e.g., "Electrician", "Plumber", "General Laborer"
-  status: "available" | "deployed" | "on-leave" | "unavailable"
-  createdAt: Date
+  trade?: string
+  personalDetails?: PersonalDetails
+  complianceCertificates: ComplianceCertificate[]
+  workSites: WorkSite[]
+  createdAt: string
+  updatedAt: string
 }
+
+export interface NextOfKin {
+  name: string
+  relationship: string
+  phone: string
+  email?: string
+  address: string
+}
+
+export interface RightToWork {
+  country: string
+  status: "Verified" | "Pending" | "Expired" | "Not Provided"
+  documentUrl?: string
+  expiryDate?: string
+}
+
+
+
+export interface TimeOffRequest {
+  id: string
+  startDate: string
+  endDate: string
+  reason: string
+  status: "Approved" | "Pending" | "Rejected"
+}
+
+export interface Availability {
+  mondayToFriday: boolean
+  saturday: boolean
+  sunday: boolean
+  nightShifts: boolean
+  timeOffRequests: TimeOffRequest[]
+  unavailableDates: string[]
+}
+
 
 export interface ConstructionSite {
   id: string
@@ -18,7 +92,7 @@ export interface ConstructionSite {
   projectType: string
   startDate: Date
   endDate: Date
-  status: "planning" | "active" | "completed" | "on-hold"
+  status: String
   requiredTrades: string[]
   maxOperatives: number
   createdAt: Date
@@ -26,23 +100,22 @@ export interface ConstructionSite {
 }
 
 export type SiteOperative = {
-  id: number;
-  siteId: number;
-  operativeId: number;
-  startDate: string; // or Date
-  endDate: string;   // or Date
+  id: number
+  siteId: number
+  operativeId: number
+  startDate: string
+  endDate: string
   operative: {
-    id: number;
-    name: string;
-    email: string;
-    phone?: string;
-    trade: string;
-    certifications: string[];
-    status: string;
-    hourlyRate: number;
-    createdAt: string;
-  };
-};
+    id: number
+    name: string
+    email: string
+    phone?: string
+    trade: string
+    complianceCertificates: ComplianceCertificate[]
+    status: string
+    createdAt: string
+  }
+}
 
 export interface Client {
   id: number
@@ -53,6 +126,16 @@ export interface Client {
   contactPerson: string
   createdAt: Date
   sites: ConstructionSite[]
+  jobTypes?: ClientJobType[]
+}
+
+export interface ClientJobType {
+  id: number
+  clientId: number
+  name: string
+  payRate: number
+  clientCost: number
+  createdAt: string | Date
 }
 
 export interface SiteAssignment {
@@ -68,34 +151,12 @@ export interface SiteAssignment {
   createdAt: Date
 }
 
-export interface Manager {
+export interface SimpleOperative {
   id: string
   name: string
   email: string
-  department: string
-  avatar?: string
-}
-
-export interface TimeSlot {
-  start: Date
-  end: Date
-  available: boolean
-  assignmentId?: string
-}
-
-export interface EmailNotification {
-  id: string
-  type: "assignmentConfirmation" | "assignmentReminder" | "operativeUpdate" | "clientUpdate"
-  recipient: string
-  subject: string
-  status: "sent" | "pending" | "failed"
-  sentAt: Date
-}
-
-export interface NotificationSettings {
-  assignmentConfirmation: boolean
-  assignmentReminder: boolean
-  operativeUpdates: boolean
-  clientNotifications: boolean
-  reminderHours: number
+  phone?: string
+  trade: string
+  status: "available" | "deployed" | "on-leave" | "unavailable"
+  createdAt: Date
 }

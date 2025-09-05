@@ -27,11 +27,18 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const { name, address, clientId, projectType, startDate, endDate, requiredTrades, maxOperatives } = body
 
+    if (!clientId) {
+      return NextResponse.json({ error: "Missing clientId" }, { status: 400 })
+    }
+    if (!name || !address || !projectType || !startDate || !endDate || !maxOperatives) {
+      return NextResponse.json({ error: "Missing required fields" }, { status: 400 })
+    }
+
     const site = await prisma.constructionSite.create({
       data: {
         name,
         address,
-        clientId: clientId ? Number(clientId) : null,
+        clientId: Number(clientId),
         projectType,
         startDate: new Date(startDate),
         endDate: new Date(endDate),
