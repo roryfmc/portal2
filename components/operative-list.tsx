@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { Search, Plus, Users, AlertTriangle, CheckCircle, HardHat, UserCheck } from "lucide-react"
+import { Search, Plus, Users, AlertTriangle, CheckCircle, HardHat, UserCheck, ShieldAlert, Shield } from "lucide-react"
 import type { Operative } from "@/lib/types"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -62,12 +62,53 @@ export function OperativeList({ onSelectOperative, onAddOperative }: OperativeLi
     }
   }, [])
 
+  // Date-only comparison to avoid time-of-day off-by-one issues
+  function isDateInRange(date: Date, start: Date, end: Date) {
+    const d = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+    const s = new Date(start.getFullYear(), start.getMonth(), start.getDate())
+    const e = new Date(end.getFullYear(), end.getMonth(), end.getDate())
+    return d >= s && d <= e
+  }
+
   // Compliance status helper (hoisted via function declaration)
   function getComplianceStatus(operative: Operative) {
     const list = operative.complianceCertificates ?? []
     if (list.length === 0) return "error" as const
-    const hasRisk = list.some((c) => c.status === "EXPIRING_SOON" || c.status === "EXPIRED")
-    return (hasRisk ? "warning" : "success") as const
+
+    // Required asbestos certificate types
+    const REQUIRED = [
+      "Training",
+      "Medical",
+      "Full Face Fit",
+      "Half Face Fit",
+      "Mask Service",
+    ]
+
+    const msDay = 24 * 60 * 60 * 1000
+    const now = new Date()
+    now.setHours(0, 0, 0, 0)
+
+    const hasAllAsbestos = REQUIRED.every((req) => {
+      // find matching asbestos cert by name
+      const cert = list.find((c: any) => {
+        const name = (c?.name || "").toString().trim()
+        const typeOk = (c as any)?.certType ? (c as any).certType === "ASBESTOS" : true
+        return typeOk && name.toLowerCase() === req.toLowerCase()
+      })
+      if (!cert) return false
+      // compute days until expiry
+      const exp = cert.expiryDate ? new Date(cert.expiryDate) : null
+      if (!exp || isNaN(exp.getTime())) return false
+      exp.setHours(0, 0, 0, 0)
+      const daysLeft = Math.floor((exp.getTime() - now.getTime()) / msDay)
+      // must be strictly greater than 42 days (6 weeks)
+      if (daysLeft <= 42) return false
+      // also if a status is present and indicates risk, treat as non-compliant
+      if ((cert as any).status === "EXPIRED" || (cert as any).status === "EXPIRING_SOON" || (cert as any).status === "INVALID") return false
+      return true
+    })
+
+    return (hasAllAsbestos ? "success" : "warning") as const
   }
 
   // Build a set of operativeIds currently deployed
@@ -75,7 +116,7 @@ export function OperativeList({ onSelectOperative, onAddOperative }: OperativeLi
     const now = new Date()
     return new Set(
       (assignments || [])
-        .filter((a: any) => new Date(a.startDate) <= now && new Date(a.endDate) >= now)
+        .filter((a: any) => isDateInRange(now, new Date(a.startDate), new Date(a.endDate)))
         .map((a: any) => String(a.operativeId)),
     )
   }, [assignments])
@@ -110,12 +151,12 @@ export function OperativeList({ onSelectOperative, onAddOperative }: OperativeLi
   // Derived deployment counts
   const deployedCount = useMemo(() => {
     const now = new Date()
-    const deployedIds = new Set(
+    const ids = new Set(
       (assignments || [])
-        .filter((a: any) => new Date(a.startDate) <= now && new Date(a.endDate) >= now)
+        .filter((a: any) => isDateInRange(now, new Date(a.startDate), new Date(a.endDate)))
         .map((a: any) => String(a.operativeId)),
     )
-    return operatives.filter((op) => deployedIds.has(String(op.id))).length
+    return operatives.filter((op) => ids.has(String(op.id))).length
   }, [assignments, operatives])
 
   const availableCount = useMemo(() => operatives.length - deployedCount, [operatives.length, deployedCount])
@@ -149,14 +190,27 @@ export function OperativeList({ onSelectOperative, onAddOperative }: OperativeLi
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
+  {/* Left side: heading + text */}
         <div>
-          <h1 className="text-3xl font-bold text-foreground">Operative Management</h1>
-          <p className="text-muted-foreground mt-1">Manage your construction workforce</p>
+          <h1 className="text-2xl font-bold">Operative Management</h1>
+          <p className="text-muted-foreground">Manage your operatives and compliance</p>
         </div>
-        <Button onClick={onAddOperative} className="bg-primary hover:bg-primary/90">
-          <Plus className="w-4 h-4 mr-2" />
-          Add Operative
-        </Button>
+
+        {/* Right side: buttons */}
+        <div className="flex items-center gap-2">
+          <Button onClick={onAddOperative} className="bg-primary hover:bg-primary/90">
+            <Plus className="w-4 h-4 mr-2" />
+            Add Operative
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => window.dispatchEvent(new CustomEvent("showCompliance"))}
+            className="border-orange-200 text-orange-700 hover:bg-orange-50"
+          >
+            <ShieldAlert className="w-4 h-4 mr-2" />
+            Expiring Compliance
+          </Button>
+        </div>
       </div>
 
       {/* Stats Cards */}
@@ -344,6 +398,35 @@ export function OperativeList({ onSelectOperative, onAddOperative }: OperativeLi
                       </span>
                     </div>
                   </div>
+
+                    {(() => {
+                      const REQUIRED = ["Training", "Medical", "Full Face Fit", "Half Face Fit", "Mask Service"]
+                      const list: any[] = (operative.complianceCertificates as any) || []
+                      const msDay = 24 * 60 * 60 * 1000
+                      const now = new Date(); now.setHours(0,0,0,0)
+                      const findCert = (t: string) => list.find((c: any) => (c?.certType ? c.certType === "ASBESTOS" : true) && String(c.name || "").toLowerCase() === t.toLowerCase())
+                      const missing = REQUIRED.filter((t) => !findCert(t))
+                      const expiring = REQUIRED.map((t) => {
+                        const c = findCert(t)
+                        if (!c || !c.expiryDate) return null
+                        const exp = new Date(c.expiryDate); exp.setHours(0,0,0,0)
+                        const days = Math.floor((exp.getTime() - now.getTime())/msDay)
+                        return { t, days }
+                      }).filter((x: any) => x && (x.days <= 42)) as {t:string;days:number}[]
+                      if (missing.length === 0 && expiring.length === 0) return null
+                      return (
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {missing.map((m) => (
+                            <Badge key={`miss-${m}`} variant="destructive" className="text-[10px]">Missing: {m}</Badge>
+                          ))}
+                          {expiring.map((e) => (
+                            <Badge key={`exp-${e.t}`} variant="secondary" className={`text-[10px] ${e.days <= 0 ? 'bg-red-100 text-red-800' : 'bg-orange-100 text-orange-700'}`}>
+                              {e.days <= 0 ? 'Expired' : 'Expiring'}: {e.t}{e.days > 0 ? ` (${e.days}d)` : ''}
+                            </Badge>
+                          ))}
+                        </div>
+                      )
+                    })()}
 
                   <div className="flex items-center gap-3">
                     <div className="text-right">

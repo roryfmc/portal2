@@ -1,6 +1,6 @@
 
 export type EmploymentType = "SELF_EMPLOYED" | "CONTRACT" | "TEMPORARY"
-export type CertificateStatus = "VALID" | "EXPIRING_SOON" | "EXPIRED"
+export type CertificateStatus = "VALID" | "EXPIRING_SOON" | "EXPIRED" | "INVALID"
 // Operative status is now derived from assignments; keep the union if needed elsewhere
 export type OperativeStatus = "AVAILABLE" | "DEPLOYED" | "ON_LEAVE" | "UNAVAILABLE"
 
@@ -20,11 +20,21 @@ export interface PersonalDetails {
 export interface ComplianceCertificate {
   id: string
   name: string
-  issuer: string
-  issueDate: string
   expiryDate: string
-  status: CertificateStatus
+  // Optional legacy fields
+  issuer?: string
+  issueDate?: string
+  status?: CertificateStatus
   documentUrl?: string | null
+  notes?: string | null
+  // Unified fields
+  trainingProvider?: string | null
+  contact?: string | null
+  certificateDetails?: string | null
+  verifiedWith?: string | null
+  verifiedBy?: string | null
+  dateVerified?: string | null
+  certType?: "GENERAL" | "ASBESTOS"
   operativeId: string
 }
 

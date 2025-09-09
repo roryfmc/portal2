@@ -24,7 +24,7 @@ interface OperativeFormProps {
 
 const EMPLOYMENT_TYPES = ["SELF_EMPLOYED", "CONTRACT", "TEMPORARY"] as const
 const RTW_STATUSES = ["VERIFIED", "PENDING", "EXPIRED", "NOT_PROVIDED"] as const
-const CERT_STATUSES = ["VALID", "EXPIRING_SOON", "EXPIRED", "INVALID"] as const
+const CERT_STATUSES = ["VALID", "EXPIRING_SOON", "EXPIRED"] as const
 
 export function OperativeForm({ operative, onSave, onCancel }: OperativeFormProps) {
   const [activeTab, setActiveTab] = useState("personal")
@@ -1333,9 +1333,8 @@ export function OperativeForm({ operative, onSave, onCancel }: OperativeFormProp
                       </Button>
                     </div>
                   </>
-                )}
                 </div>
-              )}
+            )}
               {formData.complianceCertificates.length > 0 && (
                 <div className="space-y-6">
                   {formData.complianceCertificates.map((cert: any, index: number) => (

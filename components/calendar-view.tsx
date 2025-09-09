@@ -1,57 +1,64 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { ChevronLeft, ChevronRight, Plus, Clock, Video, Phone, MapPin, HardHat, Building2, AlertTriangle, PoundSterling } from "lucide-react"
+import {
+  ChevronLeft,
+  ChevronRight,
+  Plus,
+  Clock,
+  Video,
+  Phone,
+  MapPin,
+  HardHat,
+  Building2,
+  AlertTriangle,
+  PoundSterling,
+} from "lucide-react"
 import type { ConstructionSite, Operative, Client } from "@/lib/types"
+
+type SiteFilter = "all" | "unfulfilled" | "active"
 
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
 const MONTHS = [
-  "January",
-  "February",
-  "March",
-  "April",
-  "May",
-  "June",
-  "July",
-  "August",
-  "September",
-  "October",
-  "November",
-  "December",
+  "January","February","March","April","May","June",
+  "July","August","September","October","November","December",
 ]
 
 export function CalendarView() {
   const [currentDate, setCurrentDate] = useState(new Date())
   const [selectedDate, setSelectedDate] = useState<Date | null>(null)
   const [showBookingModal, setShowBookingModal] = useState(false)
+
   const [sites, setSites] = useState<ConstructionSite[]>([])
   const [loadingSites, setLoadingSites] = useState(false)
+
   const [operatives, setOperatives] = useState<Operative[]>([])
   const [loadingOperatives, setLoadingOperatives] = useState(false)
+
   const [clients, setClients] = useState<Client[]>([])
   const [assignments, setAssignments] = useState<any[]>([])
 
+  const [siteFilter, setSiteFilter] = useState<SiteFilter>("all")
 
+  // ---- Fetch data ----
   useEffect(() => {
     const fetchSites = async () => {
       try {
         setLoadingSites(true)
         const res = await fetch("/api/sites")
-        if (res.ok) {
-          const data = await res.json()
-          // normalize dates
-          setSites(
-            data.map((s: any) => ({
-              ...s,
-              startDate: new Date(s.startDate),
-              endDate: new Date(s.endDate),
-              createdAt: s.createdAt ? new Date(s.createdAt) : new Date(),
-            })),
-          )
-        }
+        if (!res.ok) return
+        const data = await res.json()
+        setSites(
+          data.map((s: any) => ({
+            ...s,
+            startDate: new Date(s.startDate),
+            endDate: new Date(s.endDate),
+            createdAt: s.createdAt ? new Date(s.createdAt) : new Date(),
+          })),
+        )
       } catch (e) {
         console.error("Failed to fetch sites for calendar:", e)
       } finally {
@@ -66,10 +73,8 @@ export function CalendarView() {
       try {
         setLoadingOperatives(true)
         const res = await fetch("/api/operatives")
-        if (res.ok) {
-          const data = await res.json()
-          setOperatives(data)
-        }
+        if (!res.ok) return
+        setOperatives(await res.json())
       } catch (e) {
         console.error("Failed to fetch operatives for calendar:", e)
       } finally {
@@ -82,10 +87,7 @@ export function CalendarView() {
   useEffect(() => {
     const loadExtra = async () => {
       try {
-        const [cRes, aRes] = await Promise.all([
-          fetch("/api/clients"),
-          fetch("/api/assignments"),
-        ])
+        const [cRes, aRes] = await Promise.all([fetch("/api/clients"), fetch("/api/assignments")])
         if (cRes.ok) setClients(await cRes.json())
         if (aRes.ok) setAssignments(await aRes.json())
       } catch (e) {
@@ -95,7 +97,7 @@ export function CalendarView() {
     loadExtra()
   }, [])
 
-
+  // ---- Calendar math ----
   const year = currentDate.getFullYear()
   const month = currentDate.getMonth()
 
@@ -104,74 +106,103 @@ export function CalendarView() {
   const firstDayOfWeek = firstDayOfMonth.getDay()
   const daysInMonth = lastDayOfMonth.getDate()
 
-  const navigateMonth = (direction: "prev" | "next") => {
+  const navigateMonth = (dir: "prev" | "next") => {
     setCurrentDate((prev) => {
-      const newDate = new Date(prev)
-      if (direction === "prev") {
-        newDate.setMonth(prev.getMonth() - 1)
-      } else {
-        newDate.setMonth(prev.getMonth() + 1)
-      }
-      return newDate
+      const d = new Date(prev)
+      d.setMonth(prev.getMonth() + (dir === "prev" ? -1 : 1))
+      return d
     })
-  }
-  const getTypeIcon = (type: string) => {
-    switch (type) {
-      case "video":
-        return <Video className="h-3 w-3" />
-      case "phone":
-        return <Phone className="h-3 w-3" />
-      case "in-person":
-        return <MapPin className="h-3 w-3" />
-      default:
-        return <Clock className="h-3 w-3" />
-    }
   }
 
   const isDateInRange = (date: Date, start: Date, end: Date) => {
+    // Compare date-only
     const d = new Date(date.getFullYear(), date.getMonth(), date.getDate())
     const s = new Date(start.getFullYear(), start.getMonth(), start.getDate())
     const e = new Date(end.getFullYear(), end.getMonth(), end.getDate())
     return d >= s && d <= e
   }
 
-  const getFillBadge = (assignedCount: number, maxOperatives: number) => {
-    if (!maxOperatives || maxOperatives <= 0) return { label: "not filled", className: "bg-red-100 text-red-800" }
-    if (assignedCount >= maxOperatives) return { label: "filled", className: "bg-green-100 text-green-800" }
-    if (assignedCount > 0) return { label: "partial", className: "bg-yellow-100 text-yellow-800" }
-    return { label: "not filled", className: "bg-red-100 text-red-800" }
+  // Assigned count for a site on a specific date
+  const assignedOnDate = (site: any, date: Date) => {
+    const list = Array.isArray(site.operatives) ? site.operatives : []
+    const d0 = new Date(date); d0.setHours(0, 0, 0, 0)
+    return list.filter((so: any) => {
+      const s = new Date(so.startDate); s.setHours(0, 0, 0, 0)
+      const e = new Date(so.endDate);   e.setHours(0, 0, 0, 0)
+      return d0 >= s && d0 <= e
+    }).length
   }
 
+  // Base sites on date (no filter)
   const sitesOnDate = (date: Date) =>
     sites.filter((s) => isDateInRange(date, new Date(s.startDate), new Date(s.endDate)))
 
-  // ---- Top-level stats (current snapshot + small financials) ----
+  // Filtered sites on date by current filter
+  const sitesOnDateFiltered = (date: Date) => {
+  const all = sitesOnDate(date)
+
+  if (siteFilter === "all") return all
+
+  if (siteFilter === "active") {
+    // Only sites whose dates include *today* (now), regardless of the cell's date
+    const todayActive = (s: ConstructionSite) =>
+      isDateInRange(new Date(), new Date(s.startDate), new Date(s.endDate))
+
+    // Intersect with the day cell (keeps calendar logic intact, so only today's cell will show them)
+    return all.filter(todayActive)
+  }
+
+  // "unfulfilled": in-range that day AND assigned < maxOperatives (or max not set)
+  return all.filter((s: any) => {
+    const max = Number(s.maxOperatives) || 0
+    if (max <= 0) return true
+    const assigned = assignedOnDate(s, date)
+    return assigned < max
+  })
+}
+
+
+  const getFillBadge = (assignedCount: number, maxOperatives: number) => {
+    if (!maxOperatives || maxOperatives <= 0)
+      return { label: "not filled", className: "bg-red-100 text-red-800" }
+    if (assignedCount >= maxOperatives)
+      return { label: "filled", className: "bg-green-100 text-green-800" }
+    if (assignedCount > 0)
+      return { label: "partial", className: "bg-yellow-100 text-yellow-800" }
+    return { label: "not filled", className: "bg-red-100 text-red-800" }
+  }
+
+  // ---- Top-level snapshot stats ----
   const now = new Date()
-  const deployedNowCount = (() => {
+  const deployedNowCount = useMemo(() => {
     const ids = new Set(
       (assignments || [])
-        .filter((a: any) => new Date(a.startDate) <= now && new Date(a.endDate) >= now)
+        .filter((a: any) => isDateInRange(now, new Date(a.startDate), new Date(a.endDate)))
         .map((a: any) => String(a.operativeId)),
     )
     return ids.size
-  })()
+  }, [assignments])
 
-  const activeSitesCount = sites.filter((s) => isDateInRange(now, new Date(s.startDate), new Date(s.endDate))).length
+  const activeSitesCount = useMemo(
+    () => sites.filter((s) => isDateInRange(now, new Date(s.startDate), new Date(s.endDate))).length,
+    [sites],
+  )
 
-  const notFulfilledCount = (() => {
+  const notFulfilledCount = useMemo(() => {
     let count = 0
-    for (const s of sites) {
+    for (const s of sites as any) {
       if (!isDateInRange(now, new Date(s.startDate), new Date(s.endDate))) continue
-      const list = (s as any).operatives || []
-      const activeAssigned = list.filter((so: any) => isDateInRange(now, new Date(so.startDate), new Date(so.endDate))).length
-      if (s.maxOperatives > 0 && activeAssigned < s.maxOperatives) count++
+      const max = Number(s.maxOperatives) || 0
+      const activeAssigned = assignedOnDate(s, now)
+      if (max > 0 && activeAssigned < max) count++
+      if (max <= 0) count++ // consider no max set as not fulfilled
     }
     return count
-  })()
+  }, [sites])
 
-  // Financials (This Week: Mon–Sun)
+  // ---- Financials (Mon–Sun of current week) ----
   const msDay = 24 * 60 * 60 * 1000
-  const weekBounds = (() => {
+  const weekBounds = useMemo(() => {
     const d = new Date()
     const day = d.getDay()
     const offsetToMon = (day + 6) % 7
@@ -182,9 +213,9 @@ export function CalendarView() {
     end.setDate(start.getDate() + 6)
     end.setHours(23, 59, 59, 999)
     return { start, end }
-  })()
+  }, [])
 
-  const smallFinancial = (() => {
+  const smallFinancial = useMemo(() => {
     let profit = 0
     const clientsById = new Map<number, Client>()
     for (const c of clients as any) clientsById.set(c.id as any, c)
@@ -206,61 +237,11 @@ export function CalendarView() {
       profit += (clientCost - payRate) * days
     }
     return profit
-  })()
+  }, [assignments, clients, weekBounds.start, weekBounds.end])
 
-  const renderCalendarDays = () => {
-    const days = []
-
-    for (let i = 0; i < firstDayOfWeek; i++) {
-      days.push(<div key={`empty-${i}`} className="h-24 border border-border/50" />)
-    }
-
-    for (let day = 1; day <= daysInMonth; day++) {
-      const date = new Date(year, month, day)
-      const daySites = sitesOnDate(date)
-      const isToday = date.toDateString() === new Date().toDateString()
-      const isSelected = selectedDate?.toDateString() === date.toDateString()
-
-      days.push(
-        <div
-          key={day}
-          className={`h-24 border border-border/50 p-1 cursor-pointer hover:bg-accent/50 transition-colors ${
-            isToday ? "bg-primary/10 border-primary/30" : ""
-          } ${isSelected ? "bg-accent border-accent-foreground" : ""}`}
-          onClick={() => setSelectedDate(date)}
-        >
-          <div className={`text-sm font-medium mb-1 ${isToday ? "text-primary font-semibold" : ""}`}>{day}</div>
-          <div className="space-y-1">
-            {daySites.slice(0, 2).map((site) => {
-              const assigned = Array.isArray(site.operatives) ? site.operatives.length : 0
-              const fill = getFillBadge(assigned, site.maxOperatives)
-              return (
-                <div
-                  key={`site-${site.id}`}
-                  className={`text-[10px] px-1 py-0.5 rounded truncate flex items-center justify-between gap-1 border ${fill.className}`}
-                  title={`${site.name} (${assigned}/${site.maxOperatives})`}
-                >
-                  <span className="truncate">{site.name}</span>
-                  <span className="shrink-0">
-                    {assigned}/{site.maxOperatives}
-                  </span>
-                </div>
-              )
-            })}
-            {daySites.length > 2 && (
-              <div className="text-xs text-muted-foreground">+{daySites.length - 2} more</div>
-            )}
-          </div>
-        </div>,
-      )
-    }
-
-    return days
-  }
-
-  // Week metrics (Sunday-Saturday week containing currentDate)
+  // ---- Week boxes on right panel ----
   const getWeekRange = (date: Date) => {
-    const day = date.getDay() // 0-6, 0=Sun
+    const day = date.getDay() // 0=Sun
     const start = new Date(date)
     start.setDate(date.getDate() - day)
     start.setHours(0, 0, 0, 0)
@@ -269,7 +250,6 @@ export function CalendarView() {
     end.setHours(23, 59, 59, 999)
     return { start, end }
   }
-
   const { start: weekStart, end: weekEnd } = getWeekRange(currentDate)
 
   const siteOverlapsRange = (site: ConstructionSite, start: Date, end: Date) => {
@@ -277,7 +257,6 @@ export function CalendarView() {
     const e = new Date(site.endDate)
     return e >= start && s <= end
   }
-
   const sitesThisWeek = sites.filter((s) => siteOverlapsRange(s, weekStart, weekEnd))
 
   const assignedIdsThisWeek = new Set<string>(
@@ -288,18 +267,80 @@ export function CalendarView() {
           const soEnd = new Date(so.endDate)
           return soEnd >= weekStart && soStart <= weekEnd
         })
-        .map((so: any) => String(so.operativeId))
-    )
+        .map((so: any) => String(so.operativeId)),
+    ),
   )
-
   const onSiteCount = assignedIdsThisWeek.size
   const availableOperativesCount = operatives.length
     ? operatives.filter((op) => !assignedIdsThisWeek.has(String(op.id))).length
     : 0
 
+  // ---- Render helpers ----
+  const getTypeIcon = (type: string) => {
+    switch (type) {
+      case "video":
+        return <Video className="h-3 w-3" />
+      case "phone":
+        return <Phone className="h-3 w-3" />
+      case "in-person":
+        return <MapPin className="h-3 w-3" />
+      default:
+        return <Clock className="h-3 w-3" />
+    }
+  }
+
+  const renderCalendarDays = () => {
+    const cells: JSX.Element[] = []
+
+    for (let i = 0; i < firstDayOfWeek; i++) {
+      cells.push(<div key={`empty-${i}`} className="h-24 border border-border/50" />)
+    }
+
+    for (let day = 1; day <= daysInMonth; day++) {
+      const date = new Date(year, month, day)
+      const daySites = sitesOnDateFiltered(date)
+      const isToday = date.toDateString() === new Date().toDateString()
+      const isSelected = selectedDate?.toDateString() === date.toDateString()
+
+      cells.push(
+        <div
+          key={day}
+          className={`h-24 border border-border/50 p-1 cursor-pointer hover:bg-accent/50 transition-colors ${
+            isToday ? "bg-primary/10 border-primary/30" : ""
+          } ${isSelected ? "bg-accent border-accent-foreground" : ""}`}
+          onClick={() => setSelectedDate(date)}
+        >
+          <div className={`text-sm font-medium mb-1 ${isToday ? "text-primary font-semibold" : ""}`}>{day}</div>
+          <div className="space-y-1">
+            {daySites.slice(0, 2).map((site) => {
+              const assigned = assignedOnDate(site, date)
+              const fill = getFillBadge(assigned, (site as any).maxOperatives)
+              return (
+                <div
+                  key={`site-${site.id}`}
+                  className={`text-[10px] px-1 py-0.5 rounded truncate flex items-center justify-between gap-1 border ${fill.className}`}
+                  title={`${site.name} (${assigned}/${(site as any).maxOperatives || 0})`}
+                >
+                  <span className="truncate">{site.name}</span>
+                  <span className="shrink-0">
+                    {assigned}/{(site as any).maxOperatives || 0}
+                  </span>
+                </div>
+              )
+            })}
+            {daySites.length > 2 && <div className="text-xs text-muted-foreground">+{daySites.length - 2} more</div>}
+          </div>
+        </div>,
+      )
+    }
+
+    return cells
+  }
+
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      {/* Header row */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-4">
           <h2 className="text-2xl font-semibold text-balance">
             {MONTHS[month]} {year}
@@ -313,10 +354,42 @@ export function CalendarView() {
             </Button>
           </div>
         </div>
-        <Button className="flex items-center gap-2" onClick={() => setShowBookingModal(true)}>
-          <Plus className="h-4 w-4" />
-          Assign Operative
-        </Button>
+
+        {/* Filter switch */}
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-muted-foreground">Filter:</span>
+          <div className="inline-flex rounded-md border overflow-hidden">
+            <Button
+              variant={siteFilter === "all" ? "default" : "ghost"}
+              size="sm"
+              className={siteFilter === "all" ? "" : "bg-transparent"}
+              onClick={() => setSiteFilter("all")}
+            >
+              All sites
+            </Button>
+            <Button
+              variant={siteFilter === "unfulfilled" ? "default" : "ghost"}
+              size="sm"
+              className={siteFilter === "unfulfilled" ? "" : "bg-transparent"}
+              onClick={() => setSiteFilter("unfulfilled")}
+            >
+              Unfulfilled
+            </Button>
+            <Button
+              variant={siteFilter === "active" ? "default" : "ghost"}
+              size="sm"
+              className={siteFilter === "active" ? "" : "bg-transparent"}
+              onClick={() => setSiteFilter("active")}
+            >
+              Active
+            </Button>
+          </div>
+
+          <Button className="flex items-center gap-2 ml-2" onClick={() => setShowBookingModal(true)}>
+            <Plus className="h-4 w-4" />
+            Assign Operative
+          </Button>
+        </div>
       </div>
 
       {/* Top Stats */}
@@ -376,65 +449,73 @@ export function CalendarView() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+        {/* Calendar grid */}
         <div className="lg:col-span-3">
           <Card>
             <CardContent className="p-0">
               <div className="grid grid-cols-7 border-b border-border">
-                {DAYS.map((day) => (
-                  <div
-                    key={day}
-                    className="p-3 text-center font-medium text-muted-foreground border-r border-border last:border-r-0"
-                  >
-                    {day}
+                {DAYS.map((d) => (
+                  <div key={d} className="p-3 text-center font-medium text-muted-foreground border-r border-border last:border-r-0">
+                    {d}
                   </div>
                 ))}
               </div>
-
               <div className="grid grid-cols-7">{renderCalendarDays()}</div>
             </CardContent>
           </Card>
         </div>
 
+        {/* Right pane */}
         <div className="space-y-4">
           {selectedDate && (
             <Card>
               <CardHeader>
                 <CardTitle className="text-lg">
-                  {selectedDate.toLocaleDateString("en-US", {
+                  {selectedDate.toLocaleDateString("en-GB", {
                     weekday: "long",
-                    month: "long",
                     day: "numeric",
+                    month: "long",
                   })}
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                {sitesOnDate(selectedDate).map((site) => {
-                  const assigned = Array.isArray(site.operatives) ? site.operatives : []
+                {sitesOnDateFiltered(selectedDate).map((site: any) => {
+                  const assigned = assignedOnDate(site, selectedDate)
                   return (
                     <div key={site.id} className="p-3 border border-border rounded-lg space-y-2">
                       <div className="flex items-center justify-between">
                         <div className="font-medium text-sm">{site.name}</div>
                         <Badge variant="secondary">
-                          {assigned.length}/{site.maxOperatives}
+                          {assigned}/{site.maxOperatives || 0}
                         </Badge>
                       </div>
                       <div className="text-xs text-muted-foreground flex items-center gap-2">
                         <MapPin className="h-3 w-3" />
                         <span className="truncate">{site.address}</span>
                       </div>
-                      {assigned.length > 0 ? (
+                      {assigned > 0 ? (
                         <div className="flex flex-wrap gap-1">
-                          {assigned.slice(0, 6).map((so: any) => {
-                            const displayName = so?.operative?.personalDetails?.fullName || so?.operative?.id || `Operative ${so.operativeId}`
-                            return (
-                              <Badge key={so.id} variant="outline" className="text-[10px]">
-                                {displayName}
-                              </Badge>
-                            )
-                          })}
-                          {assigned.length > 6 && (
+                          {(site.operatives || [])
+                            .filter((so: any) => {
+                              const s = new Date(so.startDate)
+                              const e = new Date(so.endDate)
+                              return isDateInRange(selectedDate, s, e)
+                            })
+                            .slice(0, 6)
+                            .map((so: any) => {
+                              const displayName =
+                                so?.operative?.personalDetails?.fullName ||
+                                so?.operative?.id ||
+                                `Operative ${so.operativeId}`
+                              return (
+                                <Badge key={so.id} variant="outline" className="text-[10px]">
+                                  {displayName}
+                                </Badge>
+                              )
+                            })}
+                          {assigned > 6 && (
                             <Badge variant="outline" className="text-[10px]">
-                              +{assigned.length - 6} more
+                              +{assigned - 6} more
                             </Badge>
                           )}
                         </div>
@@ -444,9 +525,8 @@ export function CalendarView() {
                     </div>
                   )
                 })}
-
-                {sitesOnDate(selectedDate).length === 0 && (
-                  <p className="text-sm text-muted-foreground text-center py-4">No active sites on this date</p>
+                {sitesOnDateFiltered(selectedDate).length === 0 && (
+                  <p className="text-sm text-muted-foreground text-center py-4">No sites match this filter</p>
                 )}
               </CardContent>
             </Card>
@@ -473,7 +553,6 @@ export function CalendarView() {
           </Card>
         </div>
       </div>
-
     </div>
   )
 }

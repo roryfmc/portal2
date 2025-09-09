@@ -9,6 +9,15 @@ import { Prisma } from "@prisma/client"
  */
 export async function GET() {
   try {
+    // Normalize expired certificates to INVALID on each fetch
+    try {
+      const now = new Date(); now.setHours(0,0,0,0)
+      await prisma.complianceCertificate.updateMany({
+        where: { expiryDate: { lte: now } },
+        data: { status: "INVALID" as any },
+      })
+    } catch {}
+
     const operatives = await prisma.operative.findMany({
       orderBy: { createdAt: "desc" },
       include: {
@@ -32,27 +41,12 @@ export async function GET() {
 /**
  * POST /api/operatives
  * Create an operative + nested personalDetails.
- *
- * Expected payload:
- * {
- *   "trade": "Carpenter",
- *   "status": "AVAILABLE", // optional
- *   "personalDetails": {
- *     "fullName": "Jane Doe",
- *     "email": "jane@example.com",
- *     "phone": "07123 456789",
- *     "address": "1 King St, London",
- *     "dateOfBirth": "1990-03-01T00:00:00.000Z",
- *     "nationalInsurance": "QQ123456C",
- *     "employmentType": "CONTRACT",
- *     "payrollNumber": "PR-0001"
- *   }
- * }
  */
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
     const { trade, personalDetails, nextOfKin, rightToWork, availability, complianceCertificates } = body ?? {}
+
     if (!personalDetails?.fullName || !personalDetails?.email) {
       return NextResponse.json(
         { error: "Missing required fields: personalDetails.fullName and personalDetails.email" },
@@ -63,6 +57,7 @@ export async function POST(request: NextRequest) {
     const operative = await prisma.operative.create({
       data: {
         ...(trade ? { trade } : {}),
+
         ...(personalDetails && personalDetails.fullName && personalDetails.email
           ? {
               personalDetails: {
@@ -81,6 +76,7 @@ export async function POST(request: NextRequest) {
               },
             }
           : {}),
+
         ...(nextOfKin && nextOfKin.name
           ? {
               nextOfKin: {
@@ -94,6 +90,7 @@ export async function POST(request: NextRequest) {
               },
             }
           : {}),
+
         ...(rightToWork
           ? {
               rightToWork: {
@@ -106,6 +103,7 @@ export async function POST(request: NextRequest) {
               },
             }
           : {}),
+
         ...(availability
           ? {
               availability: {
@@ -121,23 +119,45 @@ export async function POST(request: NextRequest) {
               },
             }
           : {}),
+
         ...(Array.isArray(complianceCertificates) && complianceCertificates.length
           ? {
               complianceCertificates: {
                 create: complianceCertificates
                   .filter((c: any) => c?.name)
-                  .map((c: any) => ({
-                    name: String(c.name),
-                    issuer: String(c.issuer || ""),
-                    issueDate: c.issueDate ? new Date(c.issueDate) : new Date(),
-                    expiryDate: c.expiryDate ? new Date(c.expiryDate) : new Date(),
-                    status: c.status || "VALID",
-                    documentUrl: c.documentUrl ?? null,
-                  })),
+                  .map((c: any) => {
+                    const exp = c.expiryDate ? new Date(c.expiryDate) : null
+                    const now = new Date()
+                    now.setHours(0, 0, 0, 0)
+                    if (exp) exp.setHours(0, 0, 0, 0)
+
+                    const isInvalid =
+                      !!exp && !isNaN(exp.getTime()) && exp.getTime() <= now.getTime()
+                    const computedStatus = isInvalid ? "INVALID" : (c.status ?? null)
+
+                    return {
+                      name: String(c.name),
+                      expiryDate: c.expiryDate ? new Date(c.expiryDate) : new Date(),
+                      documentUrl: c.documentUrl ?? null,
+                      trainingProvider: c.trainingProvider ?? null,
+                      contact: c.contact ?? null,
+                      certificateDetails: c.certificateDetails ?? null,
+                      verifiedWith: c.verifiedWith ?? null,
+                      verifiedBy: c.verifiedBy ?? null,
+                      dateVerified: c.dateVerified ? new Date(c.dateVerified) : null,
+                      // back-compat
+                      issuer: c.issuer ?? c.trainingProvider ?? null,
+                      issueDate: c.issueDate ? new Date(c.issueDate) : null,
+                      status: computedStatus as any,
+                      notes: typeof c.notes === "string" ? c.notes : null,
+                      certType: (c.certType === "ASBESTOS" ? "ASBESTOS" : "GENERAL") as any,
+                    }
+                  }),
               },
             }
           : {}),
       },
+
       include: {
         personalDetails: true,
         nextOfKin: true,

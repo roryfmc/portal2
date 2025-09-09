@@ -201,7 +201,7 @@ export function SiteManagement() {
   const getComplianceStatus = (operative: Operative) => {
     const list = operative.complianceCertificates ?? []
     if (list.length === 0) return "error" as const
-    const hasRisk = list.some((c: any) => c.status === "EXPIRING_SOON" || c.status === "EXPIRED")
+    const hasRisk = list.some((c: any) => c.status === "EXPIRING_SOON" || c.status === "EXPIRED" || c.status === "INVALID")
     return (hasRisk ? "warning" : "success") as const
   }
 

@@ -2,6 +2,10 @@
 
 import { useEffect, useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
+import { Label } from "@/components/ui/label"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -22,10 +26,13 @@ import {
   CheckCircle,
   Clock,
   Download,
+  Save,
+  Upload,
   Trash2,
 } from "lucide-react"
 import type { Operative } from "@/lib/types"
 import { toast } from "@/components/ui/use-toast"
+import { PDFDocument, rgb, degrees, StandardFonts } from "pdf-lib"
 
 interface OperativeCardProps {
   operative: Operative
@@ -37,6 +44,33 @@ export function OperativeCard({ operative, onEdit, onBack }: OperativeCardProps)
   const [activeTab, setActiveTab] = useState("personal")
   const [isDeleting, setIsDeleting] = useState(false)
   const [isDeployedNow, setIsDeployedNow] = useState(false)
+  const [watermarking, setWatermarking] = useState<string | null>(null)
+  const [savingCert, setSavingCert] = useState(false)
+
+  // Local certs state so we can reflect updates immediately
+  const [certs, setCerts] = useState(operative.complianceCertificates ?? [])
+  useEffect(() => {
+    setCerts(operative.complianceCertificates ?? [])
+  }, [operative.complianceCertificates])
+
+  // Add-certificate form state
+  const [certType, setCertType] = useState<"general" | "asbestos">("general")
+  const [newCert, setNewCert] = useState({
+    name: "",
+    issuer: "",
+    issueDate: "",
+    expiryDate: "",
+    status: "VALID" as const,
+    notes: "",
+    pdfFile: null as File | null,
+    // Asbestos-specific extras
+    trainingProvider: "",
+    contactInfo: "",
+    certificateDetails: "",
+    verifiedWith: "",
+    verifiedBy: "",
+    dateVerified: "",
+  })
 
   // Compute real-time deployment status based on current assignments
   useEffect(() => {
@@ -47,8 +81,17 @@ export function OperativeCard({ operative, onEdit, onBack }: OperativeCardProps)
         if (!res.ok) return
         const data = await res.json()
         const now = new Date()
+        // Compare on date-only boundaries to avoid time-of-day off-by-one issues
+        const isDateInRange = (date: Date, start: Date, end: Date) => {
+          const d = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+          const s = new Date(start.getFullYear(), start.getMonth(), start.getDate())
+          const e = new Date(end.getFullYear(), end.getMonth(), end.getDate())
+          return d >= s && d <= e
+        }
         const deployed = (data as any[]).some(
-          (a) => String(a.operativeId) === String(operative.id) && new Date(a.startDate) <= now && new Date(a.endDate) >= now,
+          (a) =>
+            String(a.operativeId) === String(operative.id) &&
+            isDateInRange(now, new Date(a.startDate), new Date(a.endDate)),
         )
         if (!ignore) setIsDeployedNow(deployed)
       } catch {}
@@ -69,13 +112,15 @@ export function OperativeCard({ operative, onEdit, onBack }: OperativeCardProps)
       .slice(0, 2)
 
   // Map schema enum to UI color/icon
-  // CertificateStatus: "VALID" | "EXPIRING_SOON" | "EXPIRED"
+  // CertificateStatus: "VALID" | "EXPIRING_SOON" | "EXPIRED" | "INVALID"
   const getComplianceStatus = (certificate: { status?: string }) => {
     switch (certificate.status) {
       case "VALID":
         return { icon: CheckCircle, color: "text-green-600", bg: "bg-green-100", badgeVariant: "default" as const }
       case "EXPIRING_SOON":
         return { icon: AlertTriangle, color: "text-orange-600", bg: "bg-orange-100", badgeVariant: "secondary" as const }
+      case "INVALID":
+        return { icon: AlertTriangle, color: "text-red-600", bg: "bg-red-100", badgeVariant: "secondary" as const }
       case "EXPIRED":
         return { icon: AlertTriangle, color: "text-red-600", bg: "bg-red-100", badgeVariant: "secondary" as const }
       default:
@@ -94,6 +139,134 @@ export function OperativeCard({ operative, onEdit, onBack }: OperativeCardProps)
     })
   }
 
+  // Watermark file helper (same approach as compliance-management)
+  async function watermarkPDF(file: File, user: string): Promise<File> {
+    const bytes = await file.arrayBuffer()
+    const pdf = await PDFDocument.load(bytes)
+    let imageBytes: ArrayBuffer | null = null
+    const candidates = ["/placeholder-logo.png", "/recruiter-avatar.png", "/placeholder.jpg"]
+    for (const url of candidates) {
+      try {
+        const res = await fetch(url)
+        if (res.ok) { imageBytes = await res.arrayBuffer(); break }
+      } catch {}
+    }
+    const font = await pdf.embedFont(StandardFonts.Helvetica)
+    let embeddedImage: any = null
+    if (imageBytes) {
+      try { embeddedImage = await pdf.embedPng(imageBytes) } catch {}
+    }
+    const nowText = `Checked by ${user} on ${new Date().toLocaleDateString()}`
+    for (const page of pdf.getPages()) {
+      const { width, height } = page.getSize()
+      if (embeddedImage) {
+        const imgW = Math.min(width, height) * 0.5
+        const imgH = (embeddedImage.height / embeddedImage.width) * imgW
+        page.drawImage(embeddedImage, { x: (width - imgW)/2, y: (height - imgH)/2, width: imgW, height: imgH, opacity: 0.15, rotate: degrees(-20) })
+      }
+      const tw = font.widthOfTextAtSize(nowText, 10)
+      page.drawText(nowText, { x: Math.max(24, (width - tw)/2), y: 24, size: 10, font, color: rgb(0.2,0.2,0.2), opacity: 0.6 })
+    }
+    const out = await pdf.save()
+    return new File([out], `watermarked-${file.name}`.replace(/\s+/g, "-"), { type: "application/pdf" })
+  }
+
+  async function uploadToServer(file: File): Promise<string | null> {
+    const fd = new FormData(); fd.append("file", file)
+    const res = await fetch("/api/uploads", { method: "POST", body: fd })
+    if (!res.ok) return null
+    const data = await res.json()
+    return data.url ?? null
+  }
+
+  async function handleAddCertificate() {
+    if (!newCert.name) { toast({ title: "Certificate name required" }); return }
+    if (certType === "asbestos") {
+      if (!newCert.pdfFile) { toast({ title: "PDF required for Asbestos" }); return }
+      if (!newCert.expiryDate) { toast({ title: "Expiry date is required for Asbestos" }); return }
+    }
+    setSavingCert(true)
+    try {
+      let docUrl: string | null = null
+      if (newCert.pdfFile) {
+        try {
+          setWatermarking("Processing PDF...")
+          const wm = await watermarkPDF(newCert.pdfFile, "Current User")
+          docUrl = await uploadToServer(wm)
+        } finally { setWatermarking(null) }
+      }
+      const name = certType === "asbestos" && !/^Asbestos\s*-/.test(newCert.name)
+        ? `Asbestos - ${newCert.name}`
+        : newCert.name
+      // Build notes if asbestos extras provided
+      const asbestosNotes = certType === "asbestos"
+        ? [
+            newCert.trainingProvider ? `Training Provider: ${newCert.trainingProvider}` : "",
+            newCert.contactInfo ? `Contact: ${newCert.contactInfo}` : "",
+            newCert.certificateDetails ? `Details: ${newCert.certificateDetails}` : "",
+            newCert.verifiedWith ? `Verified With: ${newCert.verifiedWith}` : "",
+            newCert.verifiedBy ? `Verified By: ${newCert.verifiedBy}` : "",
+            newCert.dateVerified ? `Date Verified: ${newCert.dateVerified}` : "",
+          ].filter(Boolean).join("\n")
+        : ""
+
+      const getSessionId = () => {
+        try {
+          const k = "portal_session_id"
+          let v = window.localStorage.getItem(k)
+          if (!v) { v = `sess_${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`; window.localStorage.setItem(k, v) }
+          return v
+        } catch { return "anonymous" }
+      }
+      const toAdd = {
+        name,
+        expiryDate: newCert.expiryDate,
+        documentUrl: docUrl,
+        trainingProvider: certType === "asbestos" ? (newCert.trainingProvider || newCert.issuer) : (newCert.issuer || ""),
+        contact: newCert.contactInfo || "",
+        certificateDetails: newCert.certificateDetails || "",
+        verifiedWith: newCert.verifiedWith || "",
+        verifiedBy: newCert.verifiedBy || getSessionId(),
+        dateVerified: new Date().toISOString(),
+        // legacy/back-compat
+        issuer: certType === "asbestos" ? (newCert.trainingProvider || newCert.issuer) : newCert.issuer,
+        issueDate: newCert.issueDate || new Date().toISOString().slice(0,10),
+        status: newCert.status,
+        notes: (newCert.notes || asbestosNotes) || "",
+        certType: (certType === "asbestos" ? "ASBESTOS" : "GENERAL") as const,
+      }
+      const payload = { complianceCertificates: [...(certs || []), toAdd] }
+      const res = await fetch(`/api/operatives/${operative.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const updated = await res.json()
+      setCerts(updated?.complianceCertificates || payload.complianceCertificates)
+      setNewCert({
+        name: "",
+        issuer: "",
+        issueDate: "",
+        expiryDate: "",
+        status: "VALID",
+        notes: "",
+        pdfFile: null,
+        trainingProvider: "",
+        contactInfo: "",
+        certificateDetails: "",
+        verifiedWith: "",
+        verifiedBy: "",
+        dateVerified: "",
+      })
+      try { window.dispatchEvent(new Event("storage")) } catch {}
+      toast({ title: "Certificate added" })
+    } catch (e: any) {
+      console.error(e)
+      toast({ title: "Failed to add certificate", description: e?.message || "Unknown error" })
+    } finally { setSavingCert(false) }
+  }
+
   const handleDocumentDownload = (url?: string | null, filename?: string) => {
     if (!url) return
     const link = document.createElement("a")
@@ -109,7 +282,7 @@ export function OperativeCard({ operative, onEdit, onBack }: OperativeCardProps)
   const rtw = operative.rightToWork
   const nok = operative.nextOfKin
   const avail = operative.availability
-  const certs = operative.complianceCertificates ?? []
+  // const certs = operative.complianceCertificates ?? []
   const sites = operative.workSites ?? []
   const timeOff = (operative as any).timeOffRequests ?? [] // if your lib/types includes it, this will be typed
 
@@ -457,28 +630,68 @@ export function OperativeCard({ operative, onEdit, onBack }: OperativeCardProps)
               </CardTitle>
             </CardHeader>
             <CardContent>
+              {/* Add Certificate Inline Form */}
+              
               {certs.length > 0 ? (
                 <div className="space-y-4">
-                  {certs.map((cert) => {
+                 {certs.map((cert) => {
                     const status = getComplianceStatus(cert)
-                    const StatusIcon = status.icon
+
+                    // Days remaining until expiry (date-only)
+                    const msDay = 24 * 60 * 60 * 1000
+                    let daysLeft: number | null = null
+                    try {
+                      if (cert?.expiryDate) {
+                        const now = new Date(); now.setHours(0, 0, 0, 0)
+                        const exp = new Date(cert.expiryDate as any); exp.setHours(0, 0, 0, 0)
+                        if (!isNaN(exp.getTime())) {
+                          daysLeft = Math.floor((exp.getTime() - now.getTime()) / msDay)
+                        }
+                      }
+                    } catch {}
+
+                    const isInvalid = (cert?.status === "INVALID") || (typeof daysLeft === "number" && daysLeft <= 0)
+                    const StatusIcon = isInvalid ? AlertTriangle : status.icon
+
                     return (
                       <div key={cert.id} className="border rounded-lg p-4">
                         <div className="flex items-start justify-between mb-3">
                           <div className="flex-1">
                             <h3 className="font-semibold text-lg">{cert.name}</h3>
-                            <p className="text-muted-foreground">Issued by {cert.issuer}</p>
+                            <p className="text-muted-foreground">
+                              {cert.trainingProvider ? (
+                                <>Training Provider: {cert.trainingProvider}</>
+                              ) : (
+                                <>Issued by {cert.issuer}</>
+                              )}
+                            </p>
                           </div>
                           <div className="flex items-center gap-2">
-                            <div className={`p-2 rounded-lg ${status.bg}`}>
-                              <StatusIcon className={`w-4 h-4 ${status.color}`} />
+                            <div className={`p-2 rounded-lg ${isInvalid ? "bg-red-100" : status.bg}`}>
+                              <StatusIcon className={`w-4 h-4 ${isInvalid ? "text-red-600" : status.color}`} />
                             </div>
+
                             <Badge
                               variant={status.badgeVariant}
-                              className={cert.status === "VALID" ? "bg-green-100 text-green-800" : ""}
+                              className={
+                                (isInvalid || cert.status === "INVALID" || cert.status === "EXPIRED")
+                                  ? "bg-red-100 text-red-800"
+                                  : (cert.status === "VALID" ? "bg-green-100 text-green-800" : "")
+                              }
                             >
-                              {cert.status}
+                              {isInvalid ? "INVALID" : (cert.status || "VALID")}
                             </Badge>
+
+                            {typeof daysLeft === "number" && daysLeft <= 42 && (
+                              <Badge
+                                variant="secondary"
+                                className={`text-xs ${daysLeft <= 0 ? "bg-red-100 text-red-800" : "bg-orange-100 text-orange-700"}`}
+                              >
+                                {daysLeft <= 0
+                                  ? (daysLeft === 0 ? "Expires today" : `Expired ${Math.abs(daysLeft)}d ago`)
+                                  : `Expiring in ${daysLeft}d`}
+                              </Badge>
+                            )}
                           </div>
                         </div>
 
@@ -514,7 +727,7 @@ export function OperativeCard({ operative, onEdit, onBack }: OperativeCardProps)
                         )}
                       </div>
                     )
-                  })}
+                  })} 
                 </div>
               ) : (
                 <div className="text-center py-12">
@@ -661,3 +874,4 @@ export function OperativeCard({ operative, onEdit, onBack }: OperativeCardProps)
     </div>
   )
 }
+

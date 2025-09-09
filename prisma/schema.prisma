@@ -30,6 +30,13 @@ enum CertificateStatus {
   VALID
   EXPIRING_SOON
   EXPIRED
+  INVALID
+}
+
+// Type/kind of certificate for UI categorization
+enum CertificateType {
+  GENERAL
+  ASBESTOS
 }
 
 enum TimeOffStatus {
@@ -130,11 +137,21 @@ model WorkSite {
 model ComplianceCertificate {
   id           String            @id @default(uuid())
   name         String
-  issuer       String
-  issueDate    DateTime
+  issuer       String?
+  issueDate    DateTime?
   expiryDate   DateTime
-  status       CertificateStatus
+  status       CertificateStatus?
   documentUrl  String?
+  notes        String?
+  certType     CertificateType   @default(GENERAL)
+
+  // Unified fields for both general and asbestos
+  trainingProvider  String?
+  contact           String?
+  certificateDetails String?
+  verifiedWith      String?
+  verifiedBy        String?
+  dateVerified      DateTime?
 
   operativeId  String
   operative    Operative         @relation(fields: [operativeId], references: [id], onDelete: Cascade)
