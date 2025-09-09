@@ -1,15 +1,17 @@
 "use client"
 
 import { useMemo, useState } from "react"
+import type React from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
-import { User, Users, FileText, Building, Shield, Calendar, Save, X, Plus, Trash2, Briefcase } from "lucide-react"
+import { User, Users, FileText, Upload, Building, Shield, Calendar, Save, X, Plus, Trash2, Briefcase } from "lucide-react"
 import { DocumentUpload } from "@/components/document-upload"
 import type { Operative, WorkSite, ComplianceCertificate, TimeOffRequest } from "@/lib/types"
 import { toast } from "@/components/ui/use-toast"
@@ -22,10 +24,107 @@ interface OperativeFormProps {
 
 const EMPLOYMENT_TYPES = ["SELF_EMPLOYED", "CONTRACT", "TEMPORARY"] as const
 const RTW_STATUSES = ["VERIFIED", "PENDING", "EXPIRED", "NOT_PROVIDED"] as const
-const CERT_STATUSES = ["VALID", "EXPIRING_SOON", "EXPIRED"] as const
+const CERT_STATUSES = ["VALID", "EXPIRING_SOON", "EXPIRED", "INVALID"] as const
 
 export function OperativeForm({ operative, onSave, onCancel }: OperativeFormProps) {
   const [activeTab, setActiveTab] = useState("personal")
+  // Add-certificate style switcher for Compliance tab
+  const [newCertType, setNewCertType] = useState<"general" | "asbestos">("general")
+  const [showAddForm, setShowAddForm] = useState(false)
+  // New unified add-certificate UI state (modeled after compliance-management)
+  const [certificateType, setCertificateType] = useState<"general" | "asbestos">("general")
+  const [newCertificate, setNewCertificate] = useState({
+    name: "",
+    issuer: "",
+    issueDate: "",
+    expiryDate: "",
+    status: "VALID" as const,
+    notes: "",
+    pdfFile: null as File | null,
+  })
+  const [asbestosCertificate, setAsbestosCertificate] = useState({
+    pdfFile: null as File | null,
+    items: {
+      asbestosTraining: {
+        present: false,
+        expiryDate: "",
+        trainingProvider: "",
+        contactInfo: "",
+        certificateDetails: "",
+        verifiedWith: "",
+        verifiedBy: "",
+        dateVerified: "",
+      },
+      asbestosMedical: {
+        present: false,
+        expiryDate: "",
+        trainingProvider: "",
+        contactInfo: "",
+        certificateDetails: "",
+        verifiedWith: "",
+        verifiedBy: "",
+        dateVerified: "",
+      },
+      fullFaceFit: {
+        present: false,
+        expiryDate: "",
+        trainingProvider: "",
+        contactInfo: "",
+        certificateDetails: "",
+        verifiedWith: "",
+        verifiedBy: "",
+        dateVerified: "",
+      },
+      halfFaceFit: {
+        present: false,
+        expiryDate: "",
+        trainingProvider: "",
+        contactInfo: "",
+        certificateDetails: "",
+        verifiedWith: "",
+        verifiedBy: "",
+        dateVerified: "",
+      },
+      maskService: {
+        present: false,
+        expiryDate: "",
+        trainingProvider: "",
+        contactInfo: "",
+        certificateDetails: "",
+        verifiedWith: "",
+        verifiedBy: "",
+        dateVerified: "",
+      },
+    },
+  })
+  const [updating, setUpdating] = useState(false)
+  const [watermarking, setWatermarking] = useState<string | null>(null)
+  // Keys to force-reset upload widgets after adding a certificate
+  const [genFormKey, setGenFormKey] = useState(0)
+  const [asbFormKey, setAsbFormKey] = useState(0)
+  const [newGeneralCert, setNewGeneralCert] = useState({
+    name: "",
+    expiryDate: "",
+    trainingProvider: "",
+    contact: "",
+    certificateDetails: "",
+    verifiedWith: "",
+    verifiedBy: "",
+    dateVerified: "",
+    documentUrl: "",
+  })
+  const [newAsbestosCert, setNewAsbestosCert] = useState({
+    trainingProvider: "",
+    contact: "",
+    certificateDetails: "",
+    verifiedWith: "",
+    verifiedBy: "",
+    dateVerified: "",
+    issueDate: "",
+    expiryDate: "",
+    status: "VALID" as const,
+    documentUrl: "",
+  })
 
   // ---------- Local form state (keeps full model shape for UI),
   // but only submits fields supported by current API (personalDetails + related) ----------
@@ -97,6 +196,7 @@ export function OperativeForm({ operative, onSave, onCancel }: OperativeFormProp
           issueDate: (c as any).issueDate ? (c as any).issueDate.slice(0, 10) : "",
           expiryDate: (c as any).expiryDate ? (c as any).expiryDate.slice(0, 10) : "",
           status: CERT_STATUSES.includes(c.status as any) ? c.status : "VALID",
+          certType: (c as any).certType ?? "GENERAL",
         })),
         trade: operative.trade ?? undefined,
         createdAt: operative.createdAt ?? nowIso,
@@ -319,12 +419,185 @@ export function OperativeForm({ operative, onSave, onCancel }: OperativeFormProp
   }
 
   const handleCertificateDocumentUpload = (index: number, _file: File, url: string) => {
+    const getSessionId = () => {
+      try {
+        const k = "portal_session_id"
+        let v = window.localStorage.getItem(k)
+        if (!v) {
+          v = `sess_${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`
+          window.localStorage.setItem(k, v)
+        }
+        return v
+      } catch {
+        return "anonymous"
+      }
+    }
     setFormData((prev: any) => ({
       ...prev,
       complianceCertificates: prev.complianceCertificates.map((c: any, i: number) =>
-        i === index ? { ...c, documentUrl: url } : c
+        i === index
+          ? {
+              ...c,
+              documentUrl: url,
+              verifiedBy: getSessionId(),
+              dateVerified: new Date().toISOString(),
+            }
+          : c,
       ),
     }))
+  }
+
+  const handleNewCertificateUpload = (_file: File, url: string) => {
+    const getSessionId = () => {
+      try {
+        const k = "portal_session_id"
+        let v = window.localStorage.getItem(k)
+        if (!v) {
+          v = `sess_${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`
+          window.localStorage.setItem(k, v)
+        }
+        return v
+      } catch {
+        return "anonymous"
+      }
+    }
+    if (newCertType === "general") {
+      setNewGeneralCert((prev) => ({ ...prev, documentUrl: url, verifiedBy: getSessionId(), dateVerified: new Date().toISOString() }))
+    } else {
+      setNewAsbestosCert((prev) => ({ ...prev, documentUrl: url, verifiedBy: getSessionId(), dateVerified: new Date().toISOString() }))
+    }
+  }
+
+  // Helpers for new UI
+  const updateAsbestosItem = (itemKey: string, field: string, value: any) => {
+    setAsbestosCertificate((prev: any) => ({
+      ...prev,
+      items: {
+        ...prev.items,
+        [itemKey]: {
+          ...prev.items[itemKey],
+          [field]: value,
+        },
+      },
+    }))
+  }
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] || null
+    if (!file) return
+    if (file.type !== "application/pdf") return
+    if (certificateType === "general") {
+      setNewCertificate((prev) => ({ ...prev, pdfFile: file }))
+    } else {
+      setAsbestosCertificate((prev: any) => ({ ...prev, pdfFile: file }))
+    }
+  }
+
+  const uploadPdf = async (file: File): Promise<string | null> => {
+    try {
+      const fd = new FormData()
+      fd.append("file", file)
+      const res = await fetch("/api/uploads", { method: "POST", body: fd })
+      if (!res.ok) return null
+      const data = await res.json()
+      return data.url || null
+    } catch {
+      return null
+    }
+  }
+
+  const getSessionId = () => {
+    try {
+      const k = "portal_session_id"
+      let v = window.localStorage.getItem(k)
+      if (!v) { v = `sess_${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`; window.localStorage.setItem(k, v) }
+      return v
+    } catch { return "anonymous" }
+  }
+
+  const handleBulkUpdate = async () => {
+    if (!newCertificate.name) return
+    setUpdating(true)
+    try {
+      let url: string | null = null
+      if (newCertificate.pdfFile) {
+        setWatermarking("Processing PDF...")
+        url = await uploadPdf(newCertificate.pdfFile)
+        setWatermarking(null)
+      }
+      const toAdd: any = {
+        id: `cert_${Date.now()}`,
+        name: newCertificate.name.trim(),
+        issuer: newCertificate.issuer.trim(),
+        issueDate: newCertificate.issueDate || "",
+        expiryDate: newCertificate.expiryDate || "",
+        status: newCertificate.status,
+        notes: newCertificate.notes.trim() || undefined,
+        documentUrl: url || undefined,
+        certType: "GENERAL",
+        operativeId: operative?.id || "",
+      }
+      setFormData((prev: any) => ({
+        ...prev,
+        complianceCertificates: [...prev.complianceCertificates, toAdd],
+      }))
+      setNewCertificate({ name: "", issuer: "", issueDate: "", expiryDate: "", status: "VALID", notes: "", pdfFile: null })
+    } finally {
+      setUpdating(false)
+    }
+  }
+
+  const handleAsbestosBulkUpdate = async () => {
+    const anyPresent = Object.values(asbestosCertificate.items as any).some((it: any) => it.present)
+    if (!anyPresent) return
+    setUpdating(true)
+    try {
+      let url: string | null = null
+      if (asbestosCertificate.pdfFile) {
+        setWatermarking("Processing PDF...")
+        url = await uploadPdf(asbestosCertificate.pdfFile)
+        setWatermarking(null)
+      }
+      const sessionId = getSessionId()
+      const toAdd: any[] = []
+      Object.entries(asbestosCertificate.items as any).forEach(([key, item]: any) => {
+        if (!item.present) return
+        const raw = key.replace(/([A-Z])/g, " $1").replace(/^./, (s) => s.toUpperCase())
+        const name = raw.startsWith("Asbestos ") ? raw.slice(9) : raw
+        toAdd.push({
+          id: `cert_${Date.now()}_${key}`,
+          name,
+          expiryDate: item.expiryDate || "",
+          trainingProvider: item.trainingProvider || undefined,
+          contact: item.contactInfo || undefined,
+          certificateDetails: item.certificateDetails || undefined,
+          verifiedWith: item.verifiedWith || undefined,
+          verifiedBy: item.verifiedBy || sessionId,
+          dateVerified: item.dateVerified || new Date().toISOString(),
+          documentUrl: url || undefined,
+          certType: "ASBESTOS",
+          operativeId: operative?.id || "",
+        })
+      })
+      if (toAdd.length) {
+        setFormData((prev: any) => ({
+          ...prev,
+          complianceCertificates: [...prev.complianceCertificates, ...toAdd],
+        }))
+      }
+      setAsbestosCertificate({
+        pdfFile: null,
+        items: {
+          asbestosTraining: { present: false, expiryDate: "", trainingProvider: "", contactInfo: "", certificateDetails: "", verifiedWith: "", verifiedBy: "", dateVerified: "" },
+          asbestosMedical: { present: false, expiryDate: "", trainingProvider: "", contactInfo: "", certificateDetails: "", verifiedWith: "", verifiedBy: "", dateVerified: "" },
+          fullFaceFit: { present: false, expiryDate: "", trainingProvider: "", contactInfo: "", certificateDetails: "", verifiedWith: "", verifiedBy: "", dateVerified: "" },
+          halfFaceFit: { present: false, expiryDate: "", trainingProvider: "", contactInfo: "", certificateDetails: "", verifiedWith: "", verifiedBy: "", dateVerified: "" },
+          maskService: { present: false, expiryDate: "", trainingProvider: "", contactInfo: "", certificateDetails: "", verifiedWith: "", verifiedBy: "", dateVerified: "" },
+        },
+      })
+    } finally {
+      setUpdating(false)
+    }
   }
 
   // Work sites
@@ -356,21 +629,21 @@ export function OperativeForm({ operative, onSave, onCancel }: OperativeFormProp
     }))
   }
 
-  // Certificates
+  // Certificates: header button reveals the new add UI with cleared fields
   const addComplianceCertificate = () => {
-    const newCert: ComplianceCertificate = {
-      id: `cert_${Date.now()}`,
-      name: "",
-      issuer: "",
-      issueDate: "",
-      expiryDate: "",
-      status: "VALID",
-      operativeId: operative?.id || "",
-    } as any
-    setFormData((prev: any) => ({
-      ...prev,
-      complianceCertificates: [...prev.complianceCertificates, newCert],
-    }))
+    setCertificateType("general")
+    setNewCertificate({ name: "", issuer: "", issueDate: "", expiryDate: "", status: "VALID", notes: "", pdfFile: null })
+    setAsbestosCertificate({
+      pdfFile: null,
+      items: {
+        asbestosTraining: { present: false, expiryDate: "", trainingProvider: "", contactInfo: "", certificateDetails: "", verifiedWith: "", verifiedBy: "", dateVerified: "" },
+        asbestosMedical: { present: false, expiryDate: "", trainingProvider: "", contactInfo: "", certificateDetails: "", verifiedWith: "", verifiedBy: "", dateVerified: "" },
+        fullFaceFit: { present: false, expiryDate: "", trainingProvider: "", contactInfo: "", certificateDetails: "", verifiedWith: "", verifiedBy: "", dateVerified: "" },
+        halfFaceFit: { present: false, expiryDate: "", trainingProvider: "", contactInfo: "", certificateDetails: "", verifiedWith: "", verifiedBy: "", dateVerified: "" },
+        maskService: { present: false, expiryDate: "", trainingProvider: "", contactInfo: "", certificateDetails: "", verifiedWith: "", verifiedBy: "", dateVerified: "" },
+      },
+    })
+    setShowAddForm(true)
   }
 
   const updateComplianceCertificate = (index: number, field: string, value: string) => {
@@ -857,14 +1130,32 @@ export function OperativeForm({ operative, onSave, onCancel }: OperativeFormProp
                       size="sm"
                       onClick={async () => {
                         try {
+                          const getSessionId = () => {
+                            try {
+                              const k = "portal_session_id"
+                              let v = window.localStorage.getItem(k)
+                              if (!v) { v = `sess_${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`; window.localStorage.setItem(k, v) }
+                              return v
+                            } catch { return "anonymous" }
+                          }
+                          const sessionId = getSessionId()
                           const payload = {
                             complianceCertificates: (formData.complianceCertificates || []).map((c: any) => ({
                               name: c.name,
-                              issuer: c.issuer,
-                              issueDate: c.issueDate ? new Date(c.issueDate).toISOString() : null,
                               expiryDate: c.expiryDate ? new Date(c.expiryDate).toISOString() : null,
-                              status: c.status,
                               documentUrl: c.documentUrl || null,
+                              trainingProvider: c.trainingProvider || c.issuer || null,
+                              contact: c.contact || null,
+                              certificateDetails: c.certificateDetails || null,
+                              verifiedWith: c.verifiedWith || null,
+                              verifiedBy: c.verifiedBy || sessionId,
+                              dateVerified: c.dateVerified ? new Date(c.dateVerified).toISOString() : null,
+                              // legacy/back-compat
+                              issuer: c.issuer || c.trainingProvider || null,
+                              issueDate: c.issueDate ? new Date(c.issueDate).toISOString() : null,
+                              status: c.status || null,
+                              notes: c.notes || null,
+                              certType: c.certType || "GENERAL",
                             })),
                           }
                           const res = await fetch(`/api/operatives/${operative.id}`, {
@@ -877,7 +1168,17 @@ export function OperativeForm({ operative, onSave, onCancel }: OperativeFormProp
                             throw new Error(err?.error || `Failed (HTTP ${res.status})`)
                           }
                           const updated = (await res.json()) as Operative
-                          setFormData((prev: any) => ({ ...prev, complianceCertificates: (updated as any).complianceCertificates || [] }))
+                          setFormData((prev: any) => ({
+                            ...prev,
+                            complianceCertificates: ((updated as any).complianceCertificates || []).map((c: any) => ({
+                              ...c,
+                              issueDate: c.issueDate ? String(c.issueDate).slice(0, 10) : "",
+                              expiryDate: c.expiryDate ? String(c.expiryDate).slice(0, 10) : "",
+                              dateVerified: c.dateVerified ? String(c.dateVerified).slice(0, 10) : "",
+                              status: CERT_STATUSES.includes(c.status as any) ? c.status : "VALID",
+                              certType: (c as any).certType || "GENERAL",
+                            })),
+                          }))
                           toast({ title: "Certificates saved" })
                         } catch (e: any) {
                           toast({ title: "Failed to save certificates", description: e?.message || "Unknown error" })
@@ -892,12 +1193,160 @@ export function OperativeForm({ operative, onSave, onCancel }: OperativeFormProp
               </div>
             </CardHeader>
             <CardContent>
-              {formData.complianceCertificates.length > 0 ? (
+              {/* New Add Certificate UI (modeled after compliance-management) */}
+              {showAddForm && (
+                <div className="mb-6 rounded-lg border p-4">
+                <div className="flex gap-2 mb-4">
+                  <Button variant={certificateType === "general" ? "default" : "outline"} size="sm" onClick={() => setCertificateType("general")}>General Certificate</Button>
+                  <Button variant={certificateType === "asbestos" ? "default" : "outline"} size="sm" onClick={() => setCertificateType("asbestos")}>Asbestos Certificate</Button>
+                </div>
+                {certificateType === "general" ? (
+                  <>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <Label htmlFor="cert-name">Certificate Name</Label>
+                        <Input id="cert-name" value={newCertificate.name} onChange={(e) => setNewCertificate((prev) => ({ ...prev, name: e.target.value }))} placeholder="e.g., CSCS Card, First Aid" />
+                      </div>
+                      <div>
+                        <Label htmlFor="cert-issuer">Issuer</Label>
+                        <Input id="cert-issuer" value={newCertificate.issuer} onChange={(e) => setNewCertificate((prev) => ({ ...prev, issuer: e.target.value }))} placeholder="e.g., CITB, Red Cross" />
+                      </div>
+                      <div>
+                        <Label htmlFor="cert-issue">Issue Date</Label>
+                        <Input id="cert-issue" type="date" value={newCertificate.issueDate} onChange={(e) => setNewCertificate((prev) => ({ ...prev, issueDate: e.target.value }))} />
+                      </div>
+                      <div>
+                        <Label htmlFor="cert-expiry">Expiry Date</Label>
+                        <Input id="cert-expiry" type="date" value={newCertificate.expiryDate} onChange={(e) => setNewCertificate((prev) => ({ ...prev, expiryDate: e.target.value }))} />
+                      </div>
+                    </div>
+                    <div>
+                      <Label htmlFor="cert-notes">Notes (Optional)</Label>
+                      <Textarea id="cert-notes" value={newCertificate.notes} onChange={(e) => setNewCertificate((prev) => ({ ...prev, notes: e.target.value }))} rows={2} />
+                    </div>
+                    <div>
+                      <Label htmlFor="cert-pdf">Certificate PDF (Optional)</Label>
+                      <div className="flex items-center gap-2">
+                        <Input id="cert-pdf" type="file" accept=".pdf" onChange={handleFileUpload} className="flex-1" />
+                        {newCertificate.pdfFile && (
+                          <Badge variant="secondary" className="flex items-center gap-1">
+                            <FileText className="w-3 h-3" />
+                            {newCertificate.pdfFile.name}
+                          </Badge>
+                        )}
+                      </div>
+                      {newCertificate.pdfFile && (
+                        <p className="text-xs text-muted-foreground mt-1">PDF will be automatically processed before saving</p>
+                      )}
+                    </div>
+                    {watermarking && (
+                      <div className="flex items-center gap-2 text-sm text-blue-600"> <Upload className="w-4 h-4 animate-spin" /> {watermarking} </div>
+                    )}
+                    <div className="flex gap-2">
+                      <Button onClick={handleBulkUpdate} disabled={!newCertificate.name || updating || !!watermarking} className="bg-primary hover:bg-primary/90">
+                        <Save className="w-4 h-4 mr-2" />
+                        {updating ? "Updating..." : "Add Certificate"}
+                      </Button>
+                      <Button variant="outline" onClick={() => { setNewCertificate({ name: "", issuer: "", issueDate: "", expiryDate: "", status: "VALID", notes: "", pdfFile: null }); setShowAddForm(false) }}>
+                        <X className="w-4 h-4 mr-2" />
+                        Cancel
+                      </Button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div>
+                      <Label htmlFor="asbestos-pdf">Asbestos Certificate PDF (Required)</Label>
+                      <div className="flex items-center gap-2">
+                        <Input id="asbestos-pdf" type="file" accept=".pdf" onChange={handleFileUpload} className="flex-1" />
+                        {asbestosCertificate.pdfFile && (
+                          <Badge variant="secondary" className="flex items-center gap-1">
+                            <FileText className="w-3 h-3" />
+                            {asbestosCertificate.pdfFile.name}
+                          </Badge>
+                        )}
+                      </div>
+                      {asbestosCertificate.pdfFile && (
+                        <p className="text-xs text-muted-foreground mt-1">PDF will be automatically processed before saving</p>
+                      )}
+                    </div>
+                    <div className="space-y-6">
+                      <h4 className="font-semibold">Asbestos Certificate Items</h4>
+                      {Object.entries(asbestosCertificate.items as any).map(([key, item]: any) => {
+                        const displayName = key.replace(/([A-Z])/g, " $1").replace(/^./, (str) => str.toUpperCase())
+                        return (
+                          <div key={key} className="border rounded-lg p-4 space-y-4">
+                            <div className="flex items-center gap-2">
+                              <Checkbox checked={item.present} onCheckedChange={(checked) => updateAsbestosItem(key, "present", checked)} />
+                              <Label className="font-medium">{displayName}</Label>
+                              {item.present && (
+                                <Badge variant="secondary" className="text-xs">Present in PDF</Badge>
+                              )}
+                            </div>
+                            {item.present && (
+                              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 ml-6">
+                                <div>
+                                  <Label className="text-xs">Expiry Date</Label>
+                                  <Input type="date" value={item.expiryDate} onChange={(e) => updateAsbestosItem(key, "expiryDate", e.target.value)} className="text-sm" />
+                                </div>
+                                <div>
+                                  <Label className="text-xs">Training Provider</Label>
+                                  <Input value={item.trainingProvider} onChange={(e) => updateAsbestosItem(key, "trainingProvider", e.target.value)} placeholder="Provider name" className="text-sm" />
+                                </div>
+                                <div>
+                                  <Label className="text-xs">Contact Information</Label>
+                                  <Input value={item.contactInfo} onChange={(e) => updateAsbestosItem(key, "contactInfo", e.target.value)} placeholder="Phone/Email" className="text-sm" />
+                                </div>
+                                <div>
+                                  <Label className="text-xs">Certificate Details</Label>
+                                  <Input value={item.certificateDetails} onChange={(e) => updateAsbestosItem(key, "certificateDetails", e.target.value)} placeholder="Certificate number/details" className="text-sm" />
+                                </div>
+                                <div>
+                                  <Label className="text-xs">Verified With</Label>
+                                  <Input value={item.verifiedWith} onChange={(e) => updateAsbestosItem(key, "verifiedWith", e.target.value)} placeholder="Organization/Person" className="text-sm" />
+                                </div>
+                                <div>
+                                  <Label className="text-xs">Verified By</Label>
+                                  <Input value={item.verifiedBy} onChange={(e) => updateAsbestosItem(key, "verifiedBy", e.target.value)} placeholder="Verifier name" className="text-sm" />
+                                </div>
+                                <div>
+                                  <Label className="text-xs">Date Verified</Label>
+                                  <Input type="date" value={item.dateVerified} onChange={(e) => updateAsbestosItem(key, "dateVerified", e.target.value)} className="text-sm" />
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                    {watermarking && (
+                      <div className="flex items-center gap-2 text-sm text-blue-600"> <Upload className="w-4 h-4 animate-spin" /> {watermarking} </div>
+                    )}
+                    <div className="flex gap-2">
+                      <Button onClick={handleAsbestosBulkUpdate} disabled={!asbestosCertificate.pdfFile || updating || !!watermarking || !Object.values(asbestosCertificate.items as any).some((it: any) => it.present)} className="bg-primary hover:bg-primary/90">
+                        <Save className="w-4 h-4 mr-2" />
+                        {updating ? "Updating..." : watermarking ? "Processing..." : "Add Asbestos Certificates"}
+                      </Button>
+                      <Button variant="outline" onClick={() => { setAsbestosCertificate({ pdfFile: null, items: asbestosCertificate.items }); setShowAddForm(false) }}>
+                        <X className="w-4 h-4 mr-2" />
+                        Cancel
+                      </Button>
+                    </div>
+                  </>
+                )}
+                </div>
+              )}
+              {formData.complianceCertificates.length > 0 && (
                 <div className="space-y-6">
                   {formData.complianceCertificates.map((cert: any, index: number) => (
                     <div key={cert.id} className="border rounded-lg p-4">
                       <div className="flex items-center justify-between mb-4">
-                        <h3 className="font-semibold">Certificate {index + 1}</h3>
+                        <div className="flex items-center gap-2">
+                          <h3 className="font-semibold">Certificate {index + 1}</h3>
+                          <Badge variant="outline" className="text-[10px]">
+                            {(cert.certType || "GENERAL") === "ASBESTOS" ? "Asbestos" : "General"}
+                          </Badge>
+                        </div>
                         <Button
                           onClick={() => removeComplianceCertificate(index)}
                           variant="outline"
@@ -911,26 +1360,58 @@ export function OperativeForm({ operative, onSave, onCancel }: OperativeFormProp
                       <div className="space-y-4">
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <div>
-                            <Label>Certificate Name</Label>
+                            <Label>Type</Label>
+                            <Select
+                              value={cert.certType || "GENERAL"}
+                              onValueChange={(value) => updateComplianceCertificate(index, "certType", value)}
+                            >
+                              <SelectTrigger>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="GENERAL">General</SelectItem>
+                                <SelectItem value="ASBESTOS">Asbestos</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div>
+                            <Label>{(cert.certType || "GENERAL") === "ASBESTOS" ? "Asbestos Type" : "Certificate Name"}</Label>
+                            {(cert.certType || "GENERAL") === "ASBESTOS" ? (
+                              <Select
+                                value={cert.name || ""}
+                                onValueChange={(v) => updateComplianceCertificate(index, "name", v)}
+                              >
+                                <SelectTrigger className="min-w-[180px]">
+                                  <SelectValue placeholder="Asbestos type" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="Training">Training</SelectItem>
+                                  <SelectItem value="Medical">Medical</SelectItem>
+                                  <SelectItem value="Full Face Fit">Full Face Fit</SelectItem>
+                                  <SelectItem value="Half Face Fit">Half Face Fit</SelectItem>
+                                  <SelectItem value="Mask Service">Mask Service</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            ) : (
+                              <Input
+                                value={cert.name}
+                                onChange={(e) => updateComplianceCertificate(index, "name", e.target.value)}
+                                placeholder="e.g., CSCS Card, First Aid"
+                              />
+                            )}
+                          </div>
+                          <div>
+                            <Label>Training Provider</Label>
                             <Input
-                              value={cert.name}
-                              onChange={(e) => updateComplianceCertificate(index, "name", e.target.value)}
-                              placeholder="e.g., CSCS Card, First Aid"
+                              value={cert.trainingProvider || cert.issuer || ""}
+                              onChange={(e) => updateComplianceCertificate(index, "trainingProvider", e.target.value)}
                             />
                           </div>
                           <div>
-                            <Label>Issuer</Label>
+                            <Label>Contact</Label>
                             <Input
-                              value={cert.issuer}
-                              onChange={(e) => updateComplianceCertificate(index, "issuer", e.target.value)}
-                            />
-                          </div>
-                          <div>
-                            <Label>Issue Date</Label>
-                            <Input
-                              type="date"
-                              value={cert.issueDate}
-                              onChange={(e) => updateComplianceCertificate(index, "issueDate", e.target.value)}
+                              value={cert.contact || ""}
+                              onChange={(e) => updateComplianceCertificate(index, "contact", e.target.value)}
                             />
                           </div>
                           <div>
@@ -942,22 +1423,34 @@ export function OperativeForm({ operative, onSave, onCancel }: OperativeFormProp
                             />
                           </div>
                           <div className="md:col-span-2">
-                            <Label>Status</Label>
-                            <Select
-                              value={cert.status}
-                              onValueChange={(value) => updateComplianceCertificate(index, "status", value)}
-                            >
-                              <SelectTrigger>
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {CERT_STATUSES.map((s) => (
-                                  <SelectItem key={s} value={s}>
-                                    {formatEnumLabel(s)}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+                            <Label>Certification Details</Label>
+                            <Input
+                              value={cert.certificateDetails || ""}
+                              onChange={(e) => updateComplianceCertificate(index, "certificateDetails", e.target.value)}
+                            />
+                          </div>
+                          <div className="md:col-span-2">
+                            <Label>Verified With</Label>
+                            <Input
+                              value={cert.verifiedWith || ""}
+                              onChange={(e) => updateComplianceCertificate(index, "verifiedWith", e.target.value)}
+                            />
+                          </div>
+                          <div>
+                            <Label>Verified By</Label>
+                            <Input
+                              value={cert.verifiedBy || ""}
+                              onChange={(e) => updateComplianceCertificate(index, "verifiedBy", e.target.value)}
+                              placeholder="session id"
+                            />
+                          </div>
+                          <div>
+                            <Label>Date Verified</Label>
+                            <Input
+                              type="date"
+                              value={(cert.dateVerified ? String(cert.dateVerified).slice(0, 10) : "") as any}
+                              onChange={(e) => updateComplianceCertificate(index, "dateVerified", e.target.value)}
+                            />
                           </div>
                         </div>
 
@@ -970,19 +1463,16 @@ export function OperativeForm({ operative, onSave, onCancel }: OperativeFormProp
                             maxSize={5}
                             label="Upload Certificate"
                           />
+                          {(cert.verifiedBy || cert.dateVerified) && (
+                            <p className="text-xs text-muted-foreground mt-2">
+                              Verified {cert.dateVerified ? new Date(cert.dateVerified).toLocaleDateString() : ""}
+                              {cert.verifiedBy ? ` by ${cert.verifiedBy}` : ""}
+                            </p>
+                          )}
                         </div>
                       </div>
                     </div>
                   ))}
-                </div>
-              ) : (
-                <div className="text-center py-12">
-                  <Shield className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-                  <p className="text-muted-foreground mb-4">No certificates added yet</p>
-                  <Button onClick={addComplianceCertificate} variant="outline">
-                    <Plus className="w-4 h-4 mr-2" />
-                    Add First Certificate
-                  </Button>
                 </div>
               )}
             </CardContent>
@@ -1134,3 +1624,9 @@ export function OperativeForm({ operative, onSave, onCancel }: OperativeFormProp
     </div>
   )
 }
+
+
+
+
+
+
