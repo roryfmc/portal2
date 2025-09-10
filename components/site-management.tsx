@@ -583,6 +583,9 @@ export function SiteManagement() {
   // Normal add
     setSelectedOperatives((prev) => (prev.includes(operativeId) ? prev : [...prev, operativeId]))
     }
+  // KICK OFF MODAL
+    const [kickOffModal, setKickOffModal] = useState<{ siteId: string; operativeId: string } | null>(null)
+    const [kickOffReason, setKickOffReason] = useState<string>("")
 
     // WEEK DATES FOR TIMESHEET MANAGEMENT
 // --- Attendance helpers & week scaffold ---
@@ -648,6 +651,37 @@ export function SiteManagement() {
     // helper for disabling future days in your buttons
     const todayISO = toLocalISO(new Date())
     const isFutureDate = (dateISO: string) => parseLocalISO(dateISO) > parseLocalISO(todayISO)
+    const handleKickOff = async () => {
+    if (!kickOffModal) return
+    try {
+        const target = assignments.find(
+        (a) =>
+            String(a.siteId) === String(kickOffModal.siteId) &&
+            String(a.operativeId) === String(kickOffModal.operativeId)
+        )
+        if (!target) {
+        toast({ title: "No assignment found", description: "Nothing to update for this operative." })
+        return
+        }
+
+        // Move to OFFSITE (or COMPLETED if you prefer—just change the status here)
+        const res = await fetch(`/api/assignments?id=${target.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...target, status: "OFFSITE", reason: kickOffReason }),
+        })
+        if (!res.ok) throw new Error("Failed to update assignment")
+
+        await fetchAssignments()
+        setKickOffModal(null)
+        setKickOffReason("")
+        toast({ title: "Operative moved off site", description: kickOffReason ? `Reason: ${kickOffReason}` : undefined })
+    } catch (e) {
+        console.error(e)
+        toast({ title: "Update failed", description: "Could not move operative off site." })
+    }
+    }
+
 
 
 
@@ -695,6 +729,43 @@ export function SiteManagement() {
           </Card>
         </div>
         <main className="container mx-auto px-4 py-8 space-y-8">
+        {/* KICKED OFF MODAL */}
+        {kickOffModal && (
+          <Card className="mb-8">
+            <CardHeader>
+              <CardTitle>Remove Operative from Site</CardTitle>
+              <CardDescription>Please provide a reason for removing this operative</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="reason">Reason</Label>
+                  <Select >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select reason" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Completed">Work Completed</SelectItem>
+                      <SelectItem value="Poor Performance">Poor Performance</SelectItem>
+                      <SelectItem value="Safety Violation">Safety Violation</SelectItem>
+                      <SelectItem value="Attendance Issues">Attendance Issues</SelectItem>
+                      <SelectItem value="Contract Ended">Contract Ended</SelectItem>
+                      <SelectItem value="Other">Other</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex gap-2">
+                  <Button >
+                    Confirm Removal
+                  </Button>
+                  <Button variant="outline" onClick={() => setKickOffModal(null)}>
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
         
         {/* Assignment Modal */}
         {showAssignModal && (
@@ -1281,49 +1352,15 @@ export function SiteManagement() {
 
                                         {/* Remove from site -> DELETE assignment */}
                                         <Button
-                                            size="sm"
-                                            variant="outline"
-                                            className="text-red-600 hover:text-red-700"
-                                            onClick={async () => {
-                                            try {
-                                                const target = assignments.find(
-                                                (a) =>
-                                                    String(a.siteId) === String(site.id) &&
-                                                    String(a.operativeId) === String(operative.id)
-                                                )
-                                                if (!target) {
-                                                toast({
-                                                    title: "No assignment found",
-                                                    description:
-                                                    "Nothing to remove for this operative at this site.",
-                                                })
-                                                return
-                                                }
-                                                const res = await fetch(`/api/assignments?id=${target.id}`, {
-                                                method: "DELETE",
-                                                })
-                                                if (!res.ok) throw new Error("Failed to delete assignment")
-                                                await fetchAssignments()
-                                                toast({
-                                                title: "Operative removed",
-                                                description: "Unassigned from the site.",
-                                                })
-                                                if (editingSite?.id === site.id) {
-                                                setSelectedOperatives((prev) =>
-                                                    prev.filter((id) => id !== operative.id)
-                                                )
-                                                }
-                                            } catch (e) {
-                                                console.error(e)
-                                                toast({
-                                                title: "Removal failed",
-                                                description: "Could not remove operative.",
-                                                })
-                                            }
-                                            }}
+                                        size="sm"
+                                        variant="outline"
+                                        className="text-red-600 hover:text-red-700"
+                                        title="Move operative off site"
+                                        onClick={() => setKickOffModal({ siteId: site.id, operativeId: operative.id })}
                                         >
-                                            Remove
+                                        Off Site
                                         </Button>
+
                                         </div>
                                     </div>
 
@@ -1390,7 +1427,7 @@ export function SiteManagement() {
 
                         {/* MOVED OFF SITE OPERATIVES TAB */} 
                           <TabsContent value="off-site" className="space-y-2">
-                            <p className="text-sm text-slate-600">Use your date range to determine off-site operatives via assignments.</p>
+                            <p className="text-sm text-slate-600">Operatives moved off site</p>
                           </TabsContent>
                         </Tabs>
                       </div>
