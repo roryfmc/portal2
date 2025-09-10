@@ -178,7 +178,7 @@ export interface SiteAssignment {
   endDate: Date
   trade: string
   dailyRate: number
-  status: "ASSIGNED" | "DEPLOYED" | "OFFSITE"
+  status: "AVAILABLE" | "ASSIGNED" | "DEPLOYED" | "OFFSITE"
   notes?: string
   createdAt: Date
 }
