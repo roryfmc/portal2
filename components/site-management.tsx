@@ -1,4 +1,4 @@
-﻿"use client"
+"use client"
 
 import type React from "react"
 import { useEffect, useMemo, useState } from "react"
@@ -8,46 +8,65 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Textarea } from "@/components/ui/textarea"
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Plus, Search, Edit, Trash2, Building2, MapPin, Calendar, Users, CheckCircle, AlertTriangle } from "lucide-react"
+import {
+  Plus,
+  Search,
+  Edit,
+  Trash2,
+  Building2,
+  MapPin,
+  Calendar,
+  Users,
+  CheckCircle,
+  UserPlus,
+  UserMinus,
+  AlertTriangle,
+  ArrowRight,
+} from "lucide-react"
 import type { ConstructionSite, Operative, SiteAssignment, Client } from "@/lib/types"
 import { toast } from "@/components/ui/use-toast"
-import { ToastAction } from "@/components/ui/toast"
+import { Navigation } from "@/components/navigation"
+
+// ---- Types ----
 
 type SiteActivityFilter = "all" | "active" | "inactive"
 
+// ---- Component ----
+
 export function SiteManagement() {
+  // data
   const [sites, setSites] = useState<ConstructionSite[]>([])
   const [operatives, setOperatives] = useState<Operative[]>([])
   const [assignments, setAssignments] = useState<SiteAssignment[]>([])
   const [clients, setClients] = useState<Client[]>([])
 
+  // ui state
+  const [showForm, setShowForm] = useState(false)
   const [searchTerm, setSearchTerm] = useState("")
   const [siteActivityFilter, setSiteActivityFilter] = useState<SiteActivityFilter>("all")
-
-  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [editingSite, setEditingSite] = useState<ConstructionSite | null>(null)
+  const [showAssignModal, setShowAssignModal] = useState<string | null>(null)
 
+  // operative filter state
   const [operativeSearchTerm, setOperativeSearchTerm] = useState("")
   const [selectedOperatives, setSelectedOperatives] = useState<string[]>([])
   const [availabilityFilter, setAvailabilityFilter] = useState<"all" | "available" | "deployed">("all")
   const [complianceFilter, setComplianceFilter] = useState<"all" | "compliant" | "attention">("all")
 
+  // geo + distance (kept from original, not surfaced in UI change)
   const [geoCache, setGeoCache] = useState<Record<string, { lat: number; lng: number }>>({})
   const [distanceMap, setDistanceMap] = useState<Record<string, number>>({})
   const OPENCAGE_KEY = process.env.NEXT_PUBLIC_OPENCAGE_API_KEY as string | undefined
 
+  // form
   const [formData, setFormData] = useState({
     name: "",
     address: "",
@@ -58,7 +77,8 @@ export function SiteManagement() {
     requiredTrades: "",
     maxOperatives: "",
   })
-  // Determine current site client id (from form or editing context)
+
+  // ---- Derived ----
   const currentClientId = useMemo(() => {
     if (formData.clientId) {
       const n = Number(formData.clientId)
@@ -68,59 +88,58 @@ export function SiteManagement() {
     return undefined
   }, [formData.clientId, editingSite])
 
-  // Build an index for quick operative lookup
   const operativeById = useMemo(() => {
     const map: Record<string, Operative> = {}
     for (const op of operatives) map[op.id] = op
     return map
   }, [operatives])
 
-  // Compute incompatibility reasons between a candidate operative and current selections / client
+  // ---- Incompatibility checks (kept) ----
+  const getClientName = (clientId: string | number) => {
+    const c = clients.find((cl) => Number(cl.id) === Number(clientId))
+    return c?.name || `Client #${clientId}`
+  }
+
   const getIncompatibilityWarnings = (candidate: Operative) => {
     const warnings: string[] = []
 
-    // Against client
     if (currentClientId != null && Array.isArray(candidate.unableToWorkWith)) {
       const clientBlocks = candidate.unableToWorkWith.filter(
         (u: any) => (u.targetType === "CLIENT" || u.targetType === "client") && Number(u.targetClientId) === Number(currentClientId),
       )
       for (const blk of clientBlocks) {
-        const clientName = getClientName(String(currentClientId))
-        const note = blk && typeof blk.note === "string" && blk.note.length ? " Note: " + blk.note : ""
-        warnings.push((candidate.personalDetails?.fullName || candidate.id) + " is unable to work with client " + "." + note)
+        const clientName = getClientName(currentClientId)
+        const note = blk && typeof blk.note === "string" && blk.note.length ? ` Note: ${blk.note}` : ""
+        warnings.push(`${candidate.personalDetails?.fullName || candidate.id} is unable to work with client ${clientName}.${note}`)
       }
     }
 
-    // Against other selected operatives (both directions)
     for (const selectedId of selectedOperatives) {
       if (selectedId === candidate.id) continue
       const other = operativeById[selectedId]
       if (!other) continue
 
-      // Candidate -> Other
       const candBlocks = (candidate.unableToWorkWith || []).filter(
         (u: any) => (u.targetType === "OPERATIVE" || u.targetType === "operative") && String(u.targetOperativeId) === String(other.id),
       )
       for (const blk of candBlocks) {
-        const note = blk && typeof blk.note === "string" && blk.note.length ? " Note: " + blk.note : ""
-        warnings.push((candidate.personalDetails?.fullName || candidate.id) + " is unable to work with " + (other.personalDetails?.fullName || other.id) + "." + note)
+        const note = blk && typeof blk.note === "string" && blk.note.length ? ` Note: ${blk.note}` : ""
+        warnings.push(`${candidate.personalDetails?.fullName || candidate.id} is unable to work with ${other.personalDetails?.fullName || other.id}.${note}`)
       }
 
-      // Other -> Candidate
       const otherBlocks = (other.unableToWorkWith || []).filter(
         (u: any) => (u.targetType === "OPERATIVE" || u.targetType === "operative") && String(u.targetOperativeId) === String(candidate.id),
       )
       for (const blk of otherBlocks) {
-        const note = blk && typeof blk.note === "string" && blk.note.length ? " Note: " + blk.note : ""
-        warnings.push((other.personalDetails?.fullName || other.id) + " is unable to work with " + (candidate.personalDetails?.fullName || candidate.id) + "." + note)
+        const note = blk && typeof blk.note === "string" && blk.note.length ? ` Note: ${blk.note}` : ""
+        warnings.push(`${other.personalDetails?.fullName || other.id} is unable to work with ${candidate.personalDetails?.fullName || candidate.id}.${note}`)
       }
     }
 
     return warnings
   }
 
-
-  /* ---------------- Fetch data ---------------- */
+  // ---- Fetching (kept) ----
   useEffect(() => {
     fetchOperatives()
     fetchAssignments()
@@ -131,10 +150,7 @@ export function SiteManagement() {
   const fetchClients = async () => {
     try {
       const res = await fetch("/api/clients")
-      if (res.ok) {
-        const data = await res.json()
-        setClients(data)
-      }
+      if (res.ok) setClients(await res.json())
     } catch (err) {
       console.error("Failed to fetch clients:", err)
     }
@@ -142,23 +158,17 @@ export function SiteManagement() {
 
   const fetchOperatives = async () => {
     try {
-      const response = await fetch("/api/operatives")
-      if (response.ok) {
-        const data = await response.json()
-        setOperatives(data)
-      }
-    } catch (error) {
-      console.error("Failed to fetch operatives:", error)
+      const res = await fetch("/api/operatives")
+      if (res.ok) setOperatives(await res.json())
+    } catch (err) {
+      console.error("Failed to fetch operatives:", err)
     }
   }
 
   const fetchAssignments = async () => {
     try {
       const res = await fetch("/api/assignments")
-      if (res.ok) {
-        const data = await res.json()
-        setAssignments(data)
-      }
+      if (res.ok) setAssignments(await res.json())
     } catch (err) {
       console.error("Failed to fetch assignments:", err)
     }
@@ -169,7 +179,6 @@ export function SiteManagement() {
       const res = await fetch("/api/sites")
       if (res.ok) {
         const data = await res.json()
-        // normalize dates from API
         setSites(
           data.map((s: any) => ({
             ...s,
@@ -184,20 +193,12 @@ export function SiteManagement() {
     }
   }
 
-  /* ---------------- Helpers ---------------- */
-  const isDateInRange = (date: Date, start: Date, end: Date) => {
-    const d = new Date(date.getFullYear(), date.getMonth(), date.getDate())
-    const s = new Date(start.getFullYear(), start.getMonth(), start.getDate())
-    const e = new Date(end.getFullYear(), end.getMonth(), end.getDate())
-    return d >= s && d <= e
-  }
-
-  // Week helpers (Monday–Sunday)
+  // ---- Helpers (kept) ----
   const getCurrentWeekRange = () => {
     const today = new Date()
     const d0 = new Date(today.getFullYear(), today.getMonth(), today.getDate())
-    const day = d0.getDay() // 0=Sun..6=Sat
-    const diffToMonday = (day + 6) % 7 // 0 for Monday
+    const day = d0.getDay()
+    const diffToMonday = (day + 6) % 7
     const start = new Date(d0)
     start.setDate(d0.getDate() - diffToMonday)
     const end = new Date(start)
@@ -213,9 +214,9 @@ export function SiteManagement() {
   }
 
   const getAssignedOperatives = (siteId: string) => {
-    const siteAssignments = assignments.filter((assignment) => assignment.siteId === siteId)
+    const siteAssignments = assignments.filter((a) => a.siteId === siteId)
     return siteAssignments
-      .map((assignment) => operatives.find((operative) => operative.id === assignment.operativeId))
+      .map((a) => operatives.find((o) => o.id === a.operativeId))
       .filter(Boolean) as Operative[]
   }
 
@@ -250,7 +251,7 @@ export function SiteManagement() {
     return (hasRisk ? "warning" : "success") as const
   }
 
-  /* ---------------- Filtering ---------------- */
+  // ---- Filtering (kept) ----
   const filteredSites = useMemo(() => {
     const q = searchTerm.toLowerCase()
     return sites.filter((site) => {
@@ -259,7 +260,6 @@ export function SiteManagement() {
         site.address.toLowerCase().includes(q) ||
         site.projectType.toLowerCase().includes(q)
       if (!textMatch) return false
-
       if (siteActivityFilter === "all") return true
       const active = isSiteActiveThisWeek(site)
       return siteActivityFilter === "active" ? active : !active
@@ -290,7 +290,7 @@ export function SiteManagement() {
     })
   }, [operatives, operativeSearchTerm, availabilityFilter, complianceFilter, assignments, formData, editingSite])
 
-  /* ---------------- Distance helpers ---------------- */
+  // ---- Distance helpers (kept) ----
   const geocode = async (address: string): Promise<{ lat: number; lng: number } | null> => {
     if (!address) return null
     if (geoCache[address]) return geoCache[address]
@@ -319,8 +319,7 @@ export function SiteManagement() {
     const dLon = toRad(b.lng - a.lng)
     const lat1 = toRad(a.lat)
     const lat2 = toRad(b.lat)
-    const h =
-      Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2
+    const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2
     const c = 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h))
     return R * c
   }
@@ -346,9 +345,9 @@ export function SiteManagement() {
     return () => {
       cancelled = true
     }
-  }, [filteredOperatives, formData.address, editingSite]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [filteredOperatives, formData.address, editingSite])
 
-  /* ---------------- Derived stats ---------------- */
+  // ---- Stats ----
   const totalSites = sites.length
   const fullyFulfilledCount = useMemo(() => {
     return sites.reduce((acc, site) => {
@@ -357,7 +356,7 @@ export function SiteManagement() {
     }, 0)
   }, [sites, assignments])
 
-  /* ---------------- Actions ---------------- */
+  // ---- Actions (kept) ----
   const handleOperativeAssignment = async () => {
     if (!editingSite) return
     try {
@@ -397,7 +396,6 @@ export function SiteManagement() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-
     const siteData: ConstructionSite = {
       id: editingSite?.id || undefined,
       name: formData.name,
@@ -437,6 +435,7 @@ export function SiteManagement() {
 
       await fetchSites()
       resetForm()
+      setShowForm(false)
     } catch (err) {
       console.error("Failed to save site:", err)
     }
@@ -454,7 +453,6 @@ export function SiteManagement() {
       maxOperatives: "",
     })
     setEditingSite(null)
-    setIsAddDialogOpen(false)
     setSelectedOperatives([])
     setOperativeSearchTerm("")
   }
@@ -473,7 +471,7 @@ export function SiteManagement() {
     })
     const assigned = getAssignedOperatives(site.id)
     setSelectedOperatives(assigned.map((op) => op.id))
-    setIsAddDialogOpen(true)
+    setShowForm(true)
   }
 
   const handleDelete = async (id: string) => {
@@ -492,144 +490,323 @@ export function SiteManagement() {
     return { label: "NOT FILLED", className: "bg-red-100 text-red-800" }
   }
 
-  const getClientName = (clientId: string) => {
-    const client = clients.find((c) => c.id === clientId)
-    return client?.name || "Unknown Client"
-  }
-
   const formatDate = (date: Date) =>
     new Date(date).toLocaleDateString("en-GB", { year: "numeric", month: "short", day: "numeric" })
 
-  /* ---------------- UI ---------------- */
+
+  // Return operatives NOT already assigned to this site AND not already selected in the modal
+    const getUnassignedOperatives = (siteId: string) => {
+    const assignedIds = new Set(getAssignedOperatives(siteId).map((o) => o.id))
+    const selectedIds = new Set(selectedOperatives)
+    // Use filteredOperatives to respect search/filters if you later add them above the modal
+    return filteredOperatives.filter((op) => !assignedIds.has(op.id) && !selectedIds.has(op.id))
+    }
+
+// Add to current selection with your guards (max, overlap, incompatibilities)
+    const assignOperativeToSite = (siteId: string, operativeId: string) => {
+    const op = operatives.find((o) => o.id === operativeId)
+    if (!op) return
+
+    // Max cap
+    const max = Number(formData.maxOperatives || (editingSite?.maxOperatives ?? 0))
+    if (max > 0 && selectedOperatives.length >= max) {
+        toast({
+        title: "Maximum operatives reached",
+        description: `You can assign up to ${max} operatives to this site.`,
+        })
+        return
+    }
+
+    // Overlap warning
+    if (isOperativeDeployedForCurrentRange(operativeId)) {
+        const name = op.personalDetails?.fullName || operativeId
+        const ok = window.confirm(`${name} is already assigned during this timeframe. Assign to multiple sites?`)
+        if (!ok) return
+    }
+
+    // Incompatibility warnings (+ override)
+    const warnings = getIncompatibilityWarnings(op)
+    if (warnings.length > 0) {
+        const proceed = () => {
+        setSelectedOperatives((prev) => (prev.includes(operativeId) ? prev : [...prev, operativeId]))
+        toast({ title: "Override applied", description: "Operative assigned despite incompatibility." })
+        }
+        const t = toast({
+        description: (
+            <div className="space-y-3">
+            <div className="flex items-center gap-2 font-semibold">
+                <AlertTriangle className="h-5 w-5 text-amber-600" />
+                <span>Operative Unable to Work</span>
+            </div>
+            <p className="text-sm">
+                This operative is unable to work with the client or someone already assigned to this site.
+            </p>
+            <ul className="list-disc list-inside text-sm text-muted-foreground space-y-1">
+                {warnings.map((w, i) => (
+                <li key={i}>{w}</li>
+                ))}
+            </ul>
+            <div className="flex justify-end">
+                <Button
+                size="sm"
+                onClick={() => {
+                    proceed()
+                    try {
+                    // @ts-ignore – shadcn toast typings
+                    toast.dismiss(t.id)
+                    } catch {}
+                }}
+                >
+                Override &amp; Assign
+                </Button>
+            </div>
+            </div>
+        ),
+        })
+        return
+    }
+
+  // Normal add
+    setSelectedOperatives((prev) => (prev.includes(operativeId) ? prev : [...prev, operativeId]))
+    }
+
+  // ---- UI ----
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold">Site Management</h1>
-          <p className="text-muted-foreground">Manage construction sites and project assignments</p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold text-slate-900">Site Management</h1>
+            <p className="text-slate-600 mt-2">Manage construction sites and project assignments</p>
+          </div>
+          <Button onClick={() => { if (showForm) { setShowForm(false); resetForm() } else { setShowForm(true) } }} className="bg-orange-600 hover:bg-orange-700">
+            <Plus className="h-4 w-4 mr-2" />
+            {editingSite ? "Edit Site" : showForm ? "Close" : "Add Site"}
+          </Button>
         </div>
+        
+        {/* Stats */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <Card>
+            <CardContent className="p-6">
+              <div className="flex items-center gap-4">
+                <div className="p-3 bg-primary/10 rounded-lg">
+                  <Building2 className="w-6 h-6 text-primary" />
+                </div>
+                <div>
+                  <p className="text-2xl font-bold">{totalSites}</p>
+                  <p className="text-sm text-muted-foreground">Total Sites</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-6">
+              <div className="flex items-center gap-4">
+                <div className="p-3 bg-green-100 rounded-lg">
+                  <CheckCircle className="w-6 h-6 text-green-700" />
+                </div>
+                <div>
+                  <p className="text-2xl font-bold">{fullyFulfilledCount}</p>
+                  <p className="text-sm text-muted-foreground">Fully Fulfilled</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+        <main className="container mx-auto px-4 py-8 space-y-8">
+        
+        {/* Assignment Modal */}
+        {showAssignModal && (
+            <Card className="mb-8">
+                <CardHeader>
+                <CardTitle>Assign Operatives</CardTitle>
+                <CardDescription>Select operatives to assign to this construction site</CardDescription>
+                </CardHeader>
+                <CardContent>
+                <div className="space-y-4">
+                    <div>
+                        <h4 className="font-semibold mb-3">Available Operatives</h4>
+                        <div className="space-y-2 max-h-60 overflow-y-auto">
+                        {getUnassignedOperatives(showAssignModal).map((operative) => (
+                            <div key={operative.id} className="flex items-center space-x-3 p-2 border rounded">
+                            <Button
+                                size="sm"
+                                className="bg-green-600 hover:bg-green-700"
+                                onClick={async () => {
+                                const siteId = showAssignModal!
+                                const op = operative
+                                // --- capacity check against current assigned count ---
+                                const max = Number(formData.maxOperatives || (editingSite?.maxOperatives ?? 0))
+                                const currentCount = getAssignedOperatives(siteId).length
+                                if (max > 0 && currentCount >= max) {
+                                    toast({
+                                    title: "Maximum operatives reached",
+                                    description: `You can assign up to ${max} operatives to this site.`,
+                                    })
+                                    return
+                                }
+                                // --- overlap confirm (uses your helper) ---
+                                if (isOperativeDeployedForCurrentRange(op.id)) {
+                                    const name = op.personalDetails?.fullName || op.id
+                                    const ok = window.confirm(`${name} is already assigned during this timeframe. Assign to multiple sites?`)
+                                    if (!ok) return
+                                }
+                                // helper to actually persist and refresh
+                                const persist = async () => {
+                                    // prefer editingSite dates; fallback to site by id
+                                    const siteCtx = editingSite?.id === siteId
+                                    ? editingSite
+                                    : sites.find((s) => String(s.id) === String(siteId))
+                                    const startDateISO =
+                                    (siteCtx?.startDate ?? new Date()).toISOString().split("T")[0]
+                                    const endDateISO =
+                                    (siteCtx?.endDate ?? new Date()).toISOString().split("T")[0]
+                                    const res = await fetch("/api/assignments", {
+                                    method: "POST",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({
+                                        operativeId: op.id,
+                                        siteId,
+                                        startDate: startDateISO,
+                                        endDate: endDateISO,
+                                        status: "scheduled",
+                                    }),
+                                    })
+                                    if (!res.ok) {
+                                    toast({ title: "Could not assign", description: "Server rejected the assignment." })
+                                    return
+                                    }
+                                    setSelectedOperatives((prev) =>
+                                    prev.includes(op.id) ? prev : [...prev, op.id]
+                                    )
+                                    await fetchAssignments()
+                                    toast({ title: "Operative assigned", description: "Assignment saved." })
+                                }
+                                const warnings = getIncompatibilityWarnings(op)
+                                if (warnings.length > 0) {
+                                    const t = toast({
+                                    description: (
+                                        <div className="space-y-3">
+                                        <div className="flex items-center gap-2 font-semibold">
+                                            <AlertTriangle className="h-5 w-5 text-amber-600" />
+                                            <span>Operative Unable to Work</span>
+                                        </div>
+                                        <p className="text-sm">
+                                            This operative is unable to work with the client or someone already assigned to this site.
+                                        </p>
+                                        <ul className="list-disc list-inside text-sm text-muted-foreground space-y-1">
+                                            {warnings.map((w, i) => (
+                                            <li key={i}>{w}</li>
+                                            ))}
+                                        </ul>
+                                        <div className="flex justify-end">
+                                            <Button
+                                            size="sm" onClick={async () => {await persist()
+                                                try {
+                                                toast.dismiss(t.id)
+                                                } catch {}
+                                            }}
+                                            >
+                                            Override &amp; Assign
+                                            </Button>
+                                        </div>
+                                        </div>
+                                    ),
+                                    })
+                                    return
+                                }
+                                // no warnings — persist directly
+                                await persist()
+                                }}
+                            >
+                                <UserPlus className="w-4 h-4" />
+                            </Button>
+                            <div>
+            <p className="font-medium">
+              {operative.personalDetails?.fullName ?? operative.id}
+            </p>
+            <p className="text-sm text-slate-600">{operative.trade}</p>
+          </div>
+        </div>
+      ))}
 
-        <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-          <DialogTrigger asChild>
-            <Button onClick={() => resetForm()}>
-              <Plus className="h-4 w-4 mr-2" />
-              Add Site
-            </Button>
-          </DialogTrigger>
+      {getUnassignedOperatives(showAssignModal).length === 0 && (
+        <p className="text-slate-600">All operatives are already assigned to this site</p>
+      )}
+    </div>
+  </div>
 
-          <DialogContent className="sm:max-w-[600px] max-h-[80vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>{editingSite ? "Edit Site" : "Add New Construction Site"}</DialogTitle>
-              <DialogDescription>
-                {editingSite
-                  ? "Update site information and manage operative assignments"
-                  : "Add a new construction site to your projects"}
-              </DialogDescription>
-            </DialogHeader>
-
-            <Tabs defaultValue="details" className="w-full">
-              <TabsList className="grid w-full grid-cols-2">
-                <TabsTrigger value="details">Site Details</TabsTrigger>
-                <TabsTrigger value="operatives">Assign Operatives</TabsTrigger>
-              </TabsList>
-
-              {/* DETAILS */}
-              <TabsContent value="details" className="space-y-4">
-                <form onSubmit={handleSubmit} className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="name">Site Name</Label>
-                      <Input
-                        id="name"
-                        value={formData.name}
-                        onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                        required
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="clientId">Client</Label>
-                      <Select
-                        value={formData.clientId}
-                        onValueChange={(value) => setFormData({ ...formData, clientId: value })}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select client" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {clients.map((client) => (
-                            <SelectItem key={client.id} value={client.id}>
-                              {client.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-
+  <Button
+    variant="outline"
+    onClick={() => {
+      // no bulk save needed anymore; each add already persisted
+      setShowAssignModal(null)
+    }}
+  >
+    Done
+  </Button>
+</div>
+                </CardContent>
+            </Card>
+        )}
+        {/* Inline Add/Edit Form (UI from uichange) */}
+        {showForm && (
+          <Card className="mb-2">
+            <CardHeader>
+              <CardTitle>{editingSite ? "Edit Construction Site" : "Add New Construction Site"}</CardTitle>
+              <CardDescription>{editingSite ? "Update site and assignments" : "Create a new site and assign a client"}</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div className="grid md:grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="address">Address</Label>
-                    <Input
-                      id="address"
-                      value={formData.address}
-                      onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                      required
-                    />
+                    <Label htmlFor="name">Site Name</Label>
+                    <Input id="name" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} required />
                   </div>
-
                   <div className="space-y-2">
-                    <Label htmlFor="projectType">Job Type</Label>
-                    <Select
-                      value={formData.projectType}
-                      onValueChange={(value) => setFormData({ ...formData, projectType: value })}
-                      disabled={!formData.clientId}
-                    >
+                    <Label htmlFor="clientId">Client</Label>
+                    <Select value={formData.clientId} onValueChange={(value) => setFormData({ ...formData, clientId: value })}>
                       <SelectTrigger>
-                        <SelectValue
-                          placeholder={formData.clientId ? "Select job type" : "Select a client first"}
-                        />
+                        <SelectValue placeholder="Select a client" />
                       </SelectTrigger>
                       <SelectContent>
-                        {(clients.find((c) => String(c.id) === String(formData.clientId))?.jobTypes || []).map(
-                          (jt) => (
-                            <SelectItem key={jt.id} value={jt.name}>
-                              {jt.name}
-                            </SelectItem>
-                          ),
-                        )}
+                        {clients.map((client) => (
+                          <SelectItem key={client.id} value={client.id}>
+                            {client.name}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="startDate">Start Date</Label>
-                      <Input
-                        id="startDate"
-                        type="date"
-                        value={formData.startDate}
-                        onChange={(e) => setFormData({ ...formData, startDate: e.target.value })}
-                        required
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="endDate">End Date</Label>
-                      <Input
-                        id="endDate"
-                        type="date"
-                        value={formData.endDate}
-                        onChange={(e) => setFormData({ ...formData, endDate: e.target.value })}
-                        required
-                      />
-                    </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="startDate">Start Date</Label>
+                    <Input id="startDate" type="date" value={formData.startDate} onChange={(e) => setFormData({ ...formData, startDate: e.target.value })} required />
                   </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="endDate">End Date</Label>
+                    <Input id="endDate" type="date" value={formData.endDate} onChange={(e) => setFormData({ ...formData, endDate: e.target.value })} required />
+                  </div>
+                </div>
 
+                <div className="grid md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="projectType">Job Type</Label>
+                    <Select value={formData.projectType} onValueChange={(value) => setFormData({ ...formData, projectType: value })} disabled={!formData.clientId}>
+                      <SelectTrigger>
+                        <SelectValue placeholder={formData.clientId ? "Select job type" : "Select a client first"} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(clients.find((c) => String(c.id) === String(formData.clientId))?.jobTypes || []).map((jt) => (
+                          <SelectItem key={jt.id} value={jt.name}>
+                            {jt.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                   <div className="space-y-2">
                     <Label htmlFor="requiredTrade">Trade</Label>
-                    <Select
-                      value={formData.requiredTrades}
-                      onValueChange={(value) => setFormData({ ...formData, requiredTrades: value })}
-                    >
+                    <Select value={formData.requiredTrades} onValueChange={(value) => setFormData({ ...formData, requiredTrades: value })}>
                       <SelectTrigger>
                         <SelectValue placeholder="Select trade" />
                       </SelectTrigger>
@@ -643,397 +820,329 @@ export function SiteManagement() {
                       </SelectContent>
                     </Select>
                   </div>
+                </div>
 
+                <div className="grid md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="address">Address</Label>
+                    <Input id="address" value={formData.address} onChange={(e) => setFormData({ ...formData, address: e.target.value })} required />
+                  </div>
                   <div className="space-y-2">
                     <Label htmlFor="maxOperatives">Maximum Operatives</Label>
-                    <Input
-                      id="maxOperatives"
-                      type="number"
-                      value={formData.maxOperatives}
-                      onChange={(e) => setFormData({ ...formData, maxOperatives: e.target.value })}
-                      required
-                    />
+                    <Input id="maxOperatives" type="number" value={formData.maxOperatives} onChange={(e) => setFormData({ ...formData, maxOperatives: e.target.value })} required />
                   </div>
-                </form>
-              </TabsContent>
-
-              {/* OPERATIVES */}
-              <TabsContent value="operatives" className="space-y-4">
-                <div className="space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
-                    <div className="space-y-1">
-                      <Label htmlFor="avail">Availability</Label>
-                      <Select
-                        value={availabilityFilter}
-                        onValueChange={(v) => setAvailabilityFilter(v as any)}
-                      >
-                        <SelectTrigger id="avail">
-                          <SelectValue placeholder="All" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all">All</SelectItem>
-                          <SelectItem value="available">Available this week</SelectItem>
-                          <SelectItem value="deployed">Deployed this week</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-1">
-                      <Label htmlFor="comp">Compliance</Label>
-                      <Select
-                        value={complianceFilter}
-                        onValueChange={(v) => setComplianceFilter(v as any)}
-                      >
-                        <SelectTrigger id="comp">
-                          <SelectValue placeholder="All" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all">All</SelectItem>
-                          <SelectItem value="compliant">Compliant</SelectItem>
-                          <SelectItem value="attention">Needs Attention</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <Search className="h-4 w-4 text-muted-foreground" />
-                      <Input
-                        placeholder="Search operatives by name or trade..."
-                        value={operativeSearchTerm}
-                        onChange={(e) => setOperativeSearchTerm(e.target.value)}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="max-h-60 overflow-y-auto space-y-2">
-                    {filteredOperatives.map((operative) => (
-                      <div key={operative.id} className="flex items-center space-x-3 p-3 border rounded-lg">
-                        <Checkbox
-                          checked={selectedOperatives.includes(operative.id)}
-                          disabled={
-                            !selectedOperatives.includes(operative.id) &&
-                            Number(formData.maxOperatives || (editingSite?.maxOperatives ?? 0)) > 0 &&
-                            selectedOperatives.length >= Number(
-                              formData.maxOperatives || (editingSite?.maxOperatives ?? 0),
-                            )
-                          }
-                          onCheckedChange={(checked) => {
-                            const max = Number(formData.maxOperatives || (editingSite?.maxOperatives ?? 0))
-                            if (checked) {
-                              if (max > 0 && selectedOperatives.length >= max) {
-                                toast({
-                                  title: "Maximum operatives reached",
-                                  description: `You can assign up to ${max} operatives to this site.`,
-                                })
-                                return
-                              }
-                              if (isOperativeDeployedForCurrentRange(operative.id)) {
-                                const displayName = operative.personalDetails?.fullName || operative.id
-                                const ok = window.confirm(
-                                  `${displayName} is already assigned during this timeframe. Assign to multiple sites?`,
-                                )
-                                if (!ok) return
-                              }
-                              // Check incompatibilities (client and operatives) and block with toast
-                              const warnings = getIncompatibilityWarnings(operative)
-                              if (warnings.length > 0) {
-                                const proceed = () => {
-                                  setSelectedOperatives((prev) =>
-                                    prev.includes(operative.id) ? prev : [...prev, operative.id]
-                                  )
-                                  toast({
-                                    title: "Override applied",
-                                    description: "Operative assigned despite incompatibility.",
-                                  })
-                                }
-
-                                const t = toast({
-                                  description: (
-                                    <div className="space-y-3">
-                                      {/* Title row with triangle + text */}
-                                      <div className="flex items-center gap-2 font-semibold text-foreground">
-                                        <AlertTriangle className="h-5 w-5 text-amber-600" />
-                                        <span>Operative Unable to Work</span>
-                                      </div>
-
-                                      {/* Main explanation */}
-                                      <p className="text-sm text-foreground">
-                                        This operative is unable to work with the client or someone already assigned to this site.
-                                      </p>
-
-                                      {warnings.length > 0 && (
-                                        <ul className="list-disc list-inside text-sm text-muted-foreground space-y-1">
-                                          {warnings.map((w, i) => (
-                                            <li key={i}>{w}</li>
-                                          ))}
-                                        </ul>
-                                      )}
-                                      {/* Footer with button bottom-right */}
-                                      <div className="flex justify-end">
-                                        <Button
-                                          onClick={() => {
-                                            proceed()
-                                            try {
-                                              toast.dismiss(t.id)
-                                            } catch {}
-                                          }}
-                                          size="sm"
-                                          className="rounded-lg"
-                                        >
-                                          Override &amp; Assign
-                                        </Button>
-                                      </div>
-                                    </div>
-                                  ),
-                                })
-                                return
-                              }
-                              setSelectedOperatives([...selectedOperatives, operative.id])
-                            } else {
-                              setSelectedOperatives(
-                                selectedOperatives.filter((id) => id !== operative.id),
-                              )
-                            }
-                          }}
-                        />
-                        <div className="flex-1">
-                          <p className="font-medium">{operative.personalDetails?.fullName ?? operative.id}</p>
-                          <p className="text-sm text-muted-foreground">{operative.trade}</p>
-                        </div>
-                        <div className="flex items-center gap-3">
-                          {distanceMap[operative.id] && (
-                            <span className="text-xs text-muted-foreground">
-                              {distanceMap[operative.id].toFixed(1)} km away
-                            </span>
-                          )}
-                          <Badge
-                            variant={
-                              isOperativeDeployedForCurrentRange(operative.id) ? "destructive" : "default"
-                            }
-                          >
-                            {isOperativeDeployedForCurrentRange(operative.id) ? "Deployed" : "Available"}
-                          </Badge>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  {filteredOperatives.length === 0 && (
-                    <p className="text-center text-muted-foreground py-4">
-                      No operatives found matching your search
-                    </p>
-                  )}
                 </div>
-              </TabsContent>
-            </Tabs>
+                <div className="flex gap-2">
+                  <Button type="submit" className="bg-orange-600 hover:bg-orange-700">{editingSite ? "Update" : "Create"} Site</Button>
+                  <Button type="button" variant="outline" onClick={() => { resetForm(); setShowForm(false) }}>Cancel</Button>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+        )}
 
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={resetForm}>
-                Cancel
+        {/* Toolbar */}
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-muted-foreground">Show:</span>
+            <div className="inline-flex rounded-md border overflow-hidden bg-white">
+              <Button variant={siteActivityFilter === "all" ? "default" : "ghost"} size="sm" onClick={() => setSiteActivityFilter("all")}>
+                All
               </Button>
-              <Button onClick={handleSubmit}>{editingSite ? "Update" : "Add"} Site</Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      </div>
-
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center gap-4">
-              <div className="p-3 bg-primary/10 rounded-lg">
-                <Building2 className="w-6 h-6 text-primary" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">{totalSites}</p>
-                <p className="text-sm text-muted-foreground">Total Sites</p>
-              </div>
+              <Button variant={siteActivityFilter === "active" ? "default" : "ghost"} size="sm" onClick={() => setSiteActivityFilter("active")}>
+                Active (this week)
+              </Button>
+              <Button variant={siteActivityFilter === "inactive" ? "default" : "ghost"} size="sm" onClick={() => setSiteActivityFilter("inactive")}>
+                Not active this week
+              </Button>
             </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center gap-4">
-              <div className="p-3 bg-green-100 rounded-lg">
-                <CheckCircle className="w-6 h-6 text-green-700" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">{fullyFulfilledCount}</p>
-                <p className="text-sm text-muted-foreground">Fully Fulfilled</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Toolbar: activity filter + search */}
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-muted-foreground">Show:</span>
-          <div className="inline-flex rounded-md border overflow-hidden">
-            <Button
-              variant={siteActivityFilter === "all" ? "default" : "ghost"}
-              size="sm"
-              className={siteActivityFilter === "all" ? "" : "bg-transparent"}
-              onClick={() => setSiteActivityFilter("all")}
-            >
-              All
-            </Button>
-            <Button
-              variant={siteActivityFilter === "active" ? "default" : "ghost"}
-              size="sm"
-              className={siteActivityFilter === "active" ? "" : "bg-transparent"}
-              onClick={() => setSiteActivityFilter("active")}
-            >
-              Active (this week)
-            </Button>
-            <Button
-              variant={siteActivityFilter === "inactive" ? "default" : "ghost"}
-              size="sm"
-              className={siteActivityFilter === "inactive" ? "" : "bg-transparent"}
-              onClick={() => setSiteActivityFilter("inactive")}
-            >
-              Not active this week
-            </Button>
+          </div>
+          <div className="flex items-center space-x-2">
+            <Search className="h-4 w-4 text-muted-foreground" />
+            <Input placeholder="Search sites by name, address, or project type..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="max-w-sm" />
           </div>
         </div>
 
-        <div className="flex items-center space-x-2">
-          <Search className="h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search sites by name, address, or project type..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="max-w-sm"
-          />
-        </div>
-      </div>
-
-      {/* Site cards */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {filteredSites.map((site) => {
-          const assignedOperatives = getAssignedOperatives(site.id)
-          const fill = getFillBadge(assignedOperatives.length, site.maxOperatives)
-          const activeThisWeek = isSiteActiveThisWeek(site)
-
-          return (
-            <Card key={site.id} className="hover:shadow-md transition-shadow">
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <Building2 className="h-5 w-5 text-primary" />
-                    <CardTitle className="text-lg">{site.name}</CardTitle>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Badge className={fill.className}>{fill.label}</Badge>
-                    <Badge variant={activeThisWeek ? "default" : "outline"}>
-                      {activeThisWeek ? "Active this week" : "Not active this week"}
-                    </Badge>
-                  </div>
-                </div>
-                <CardDescription className="font-medium text-primary">{site.projectType}</CardDescription>
-              </CardHeader>
-
-              <CardContent className="space-y-3">
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <MapPin className="h-4 w-4" />
-                    <span>{site.address}</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <Users className="h-4 w-4" />
-                    <span>Client: {getClientName(site.clientId)}</span>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-sm">
-                    <Calendar className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-muted-foreground">
-                      {formatDate(site.startDate)} - {formatDate(site.endDate)}
-                    </span>
-                  </div>
-                  <p className="text-sm">
-                    <span className="font-medium">Max Operatives:</span> {site.maxOperatives}
-                  </p>
-                </div>
-
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs font-medium text-muted-foreground">Assigned Operatives:</p>
-                    <span className="text-xs text-muted-foreground">
-                      {assignedOperatives.length}/{site.maxOperatives}
-                    </span>
-                  </div>
-                  {assignedOperatives.length > 0 ? (
-                    <div className="flex flex-wrap gap-1">
-                      {assignedOperatives.slice(0, 3).map((operative) => {
-                        const name = operative.personalDetails?.fullName || operative.id
-                        return (
-                          <Badge key={operative.id} variant="outline" className="text-xs">
-                            {name}
-                          </Badge>
-                        )
-                      })}
-                      {assignedOperatives.length > 3 && (
-                        <Badge variant="outline" className="text-xs">
-                          +{assignedOperatives.length - 3} more
-                        </Badge>
-                      )}
-                    </div>
-                  ) : (
-                    <p className="text-xs text-muted-foreground italic">No operatives assigned</p>
-                  )}
-                </div>
-
-                <div className="space-y-1">
-                  <p className="text-xs font-medium text-muted-foreground">Required Trades:</p>
-                  <div className="flex flex-wrap gap-1">
-                    {site.requiredTrades.map((trade, index) => (
-                      <Badge key={index} variant="secondary" className="text-xs">
-                        {trade}
-                      </Badge>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="flex gap-2 pt-2">
-                  <Button variant="outline" size="sm" onClick={() => handleEdit(site)} className="flex-1">
-                    <Edit className="h-3 w-3 mr-1" />
-                    Edit
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleDelete(site.id)}
-                    className="text-destructive hover:text-destructive"
-                    aria-label="Delete site"
-                  >
-                    <Trash2 className="h-3 w-3" />
-                  </Button>
-                </div>
+        {/* Sites List (styled like uichange) */}
+        <div className="grid gap-6">
+          {filteredSites.length === 0 ? (
+            <Card>
+              <CardContent className="flex flex-col items-center justify-center py-12">
+                <Building2 className="w-12 h-12 text-slate-400 mb-4" />
+                <h3 className="text-lg font-semibold text-slate-900 mb-2">No construction sites found</h3>
+                <p className="text-slate-600 text-center mb-4">
+                  {searchTerm ? "Try adjusting your search terms" : "Add your first construction site to get started"}
+                </p>
+                <Button onClick={() => setShowForm(true)} className="bg-orange-600 hover:bg-orange-700">
+                  <Plus className="w-4 h-4 mr-2" />
+                  Add First Site
+                </Button>
               </CardContent>
             </Card>
-          )
-        })}
-      </div>
+          ) : (
+            filteredSites.map((site) => {
+              const assignedOperatives = getAssignedOperatives(site.id)
+              const fill = getFillBadge(assignedOperatives.length, site.maxOperatives)
+              const activeThisWeek = isSiteActiveThisWeek(site)
 
-      {filteredSites.length === 0 && (
-        <div className="text-center py-12">
-          <Building2 className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-          <h3 className="text-lg font-medium text-muted-foreground mb-2">No construction sites found</h3>
-          <p className="text-sm text-muted-foreground">
-            {searchTerm ? "Try adjusting your search terms" : "Add your first construction site to get started"}
-          </p>
+              return (
+                <Card key={site.id}>
+                  <CardHeader>
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <CardTitle className="text-xl">{site.name}</CardTitle>
+                        <CardDescription className="text-base">Client: {getClientName(site.clientId)}</CardDescription>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Badge className={fill.className}>{fill.label}</Badge>
+                        <Badge variant={activeThisWeek ? "default" : "outline"}>
+                          {activeThisWeek ? "Active this week" : "Not active this week"}
+                        </Badge>
+                        <Button variant="outline" size="sm" onClick={() => handleEdit(site)}>
+                          <Edit className="w-4 h-4 mr-1" /> Edit
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={() => handleDelete(site.id)} className="text-red-600 hover:text-red-700">
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="grid md:grid-cols-2 gap-6">
+                      <div className="space-y-2 text-sm">
+                        <div className="flex items-center gap-2 text-muted-foreground">
+                          <MapPin className="h-4 w-4" />
+                          <span>{site.address}</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-muted-foreground">
+                          <Calendar className="h-4 w-4" />
+                          <span>
+                            {formatDate(site.startDate)} - {formatDate(site.endDate)}
+                          </span>
+                        </div>
+                        <p>
+                          <span className="font-medium">Max Operatives:</span> {site.maxOperatives}
+                        </p>
+                        <div className="space-y-1">
+                          <p className="text-xs font-medium text-muted-foreground">Required Trades:</p>
+                          <div className="flex flex-wrap gap-1">
+                            {site.requiredTrades.map((trade, i) => (
+                              <Badge key={i} variant="secondary" className="text-xs">
+                                {trade}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-2">
+                          <Users className="w-4 h-4 text-slate-600" />
+                          <h4 className="font-semibold text-slate-900">Operative Management</h4>
+                        </div>
+
+                        <Tabs defaultValue="assigned" className="w-full">
+                          <TabsList className="grid w-full grid-cols-3">
+                            <TabsTrigger value="assigned">Assigned ({assignedOperatives.length})</TabsTrigger>
+                            <TabsTrigger value="current">This Week ({assignedOperatives.filter((o) =>assignments.some((a) =>String(a.siteId) === String(site.id) &&
+                            String(a.operativeId) === String(o.id) &&
+                            String(a.status).toUpperCase() === "ACTIVE"
+                                  )
+                                 ).length
+                                })
+                            </TabsTrigger>
+                            <TabsTrigger value="off-site">Off Site</TabsTrigger>
+                          </TabsList>
+                        {/* ASSIGNED OPERATIVES TAB */}         
+                          <TabsContent value="assigned" className="space-y-2">
+                            <div className="flex justify-between items-center">
+                                <p className="text-sm text-slate-600">Operatives assigned for future work</p>
+                                <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => {
+                                    // Preload editingSite and current selections for this site
+                                    setEditingSite(site)
+                                    const assigned = getAssignedOperatives(site.id)
+                                    setSelectedOperatives(assigned.map((op) => op.id))
+                                    setShowAssignModal(site.id)
+                                }}
+                                className="text-orange-600 hover:text-orange-700"
+                                >
+                                <UserPlus className="w-4 h-4 mr-1" />
+                                Add
+                                </Button>
+                            </div>
+
+                            {assignedOperatives.length > 0 ? (
+                                assignedOperatives.map((operative) => (
+                                <div
+                                    key={operative.id}
+                                    className="flex items-center justify-between bg-blue-50 p-3 rounded border-l-4 border-blue-400"
+                                >
+                                    <div>
+                                    <p className="font-medium text-sm">
+                                        {operative.personalDetails?.fullName || operative.id}
+                                    </p>
+                                    <p className="text-xs text-slate-600">{operative.trade}</p>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                    <Badge variant="outline" className="text-xs">Assigned</Badge>
+                                    {/* Actions (inline, no extra helpers) */}
+                                    <div className="flex gap-1">
+                                        <Button
+                                        size="sm"
+                                        className="bg-green-600 hover:bg-green-700"
+                                        title="Mark as current"
+                                        onClick={async () => {
+                                            try {
+                                            const target = assignments.find(
+                                                (a) =>
+                                                String(a.siteId) === String(site.id) &&
+                                                String(a.operativeId) === String(operative.id)
+                                            )
+                                            if (!target) {
+                                                toast({
+                                                title: "No assignment found",
+                                                description:
+                                                    "Could not locate this operative's assignment for the site.",
+                                                })
+                                                return
+                                            }
+                                            const res = await fetch(`/api/assignments?id=${target.id}`, {
+                                                method: "PUT",
+                                                headers: { "Content-Type": "application/json" },
+                                                body: JSON.stringify({ ...target, status: "active" }),
+                                            })
+                                            if (!res.ok) throw new Error("Failed to update assignment")
+                                            await fetchAssignments()
+                                            toast({
+                                                title: "Assignment updated",
+                                                description: "Marked as current.",
+                                            })
+                                            } catch (e) {
+                                            console.error(e)
+                                            toast({
+                                                title: "Update failed",
+                                                description: "Could not update status.",
+                                            })
+                                            }
+                                        }}
+                                        >
+                                        <ArrowRight className="w-4 h-4" />
+                                        </Button>
+                                        <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="text-red-600 hover:text-red-700"
+                                        title="Remove from site"
+                                        onClick={async () => {
+                                            try {
+                                            const target = assignments.find(
+                                                (a) =>
+                                                String(a.siteId) === String(site.id) &&
+                                                String(a.operativeId) === String(operative.id)
+                                            )
+                                            if (!target) {
+                                                toast({
+                                                title: "No assignment found",
+                                                description: "Nothing to remove for this operative at this site.",
+                                                })
+                                                return
+                                            }
+                                            const res = await fetch(`/api/assignments?id=${target.id}`, {
+                                                method: "DELETE",
+                                            })
+                                            if (!res.ok) throw new Error("Failed to delete assignment")
+                                            await fetchAssignments()
+                                            toast({
+                                                title: "Operative removed",
+                                                description: "Unassigned from the site.",
+                                            })
+
+                                            if (editingSite?.id === site.id) {
+                                                setSelectedOperatives((prev) =>
+                                                prev.filter((id) => id !== operative.id)
+                                                )
+                                            }
+                                            } catch (e) {
+                                            console.error(e)
+                                            toast({
+                                                title: "Removal failed",
+                                                description: "Could not remove operative.",
+                                            })
+                                            }
+                                        }}
+                                        >
+                                        <UserMinus className="w-4 h-4" />
+                                        </Button>
+                                    </div>
+                                    </div>
+                                </div>
+                                ))
+                            ) : (
+                                <p className="text-sm text-slate-600 py-4 text-center">
+                                No operatives assigned yet
+                                </p>
+                            )}
+                          </TabsContent>
+
+                        {/* CURRENT WEEK OPERATIVES TAB */} 
+                          <TabsContent value="current" className="space-y-2">
+                            {assignedOperatives.filter((o) => isOperativeDeployedThisWeek(o.id)).length > 0 ? (
+                              assignedOperatives
+                                .filter((o) => isOperativeDeployedThisWeek(o.id))
+                                .map((operative) => (
+                                  <div key={operative.id} className="bg-green-50 p-4 rounded border-l-4 border-green-400 flex items-center justify-between">
+                                    <div>
+                                      <p className="font-medium text-sm">{operative.personalDetails?.fullName || operative.id}</p>
+                                      <p className="text-xs text-slate-600">{operative.trade}</p>
+                                      <Badge variant="secondary" className="text-xs mt-1">Currently Active</Badge>
+                                    </div>
+                                  </div>
+                                ))
+                            ) : (
+                              <p className="text-sm text-slate-600 py-4 text-center">No operatives currently on site</p>
+                            )}
+                          </TabsContent>
+                        {/* MOVED OFF SITE OPERATIVES TAB */} 
+                          <TabsContent value="off-site" className="space-y-2">
+                            <p className="text-sm text-slate-600">Use your date range to determine off-site operatives via assignments.</p>
+                          </TabsContent>
+                        </Tabs>
+                      </div>
+                    </div>
+
+                    {/* Assigned operatives summary chips */}
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-medium text-muted-foreground">Assigned Operatives:</p>
+                        <span className="text-xs text-muted-foreground">{assignedOperatives.length}/{site.maxOperatives}</span>
+                      </div>
+                      {assignedOperatives.length > 0 ? (
+                        <div className="flex flex-wrap gap-1">
+                          {assignedOperatives.slice(0, 6).map((op) => (
+                            <Badge key={op.id} variant="outline" className="text-xs">
+                              {op.personalDetails?.fullName || op.id}
+                            </Badge>
+                          ))}
+                          {assignedOperatives.length > 6 && (
+                            <Badge variant="outline" className="text-xs">+{assignedOperatives.length - 6} more</Badge>
+                          )}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-muted-foreground italic">No operatives assigned</p>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+                
+              )
+            })
+          )}
         </div>
-      )}
+        </main>
+        
     </div>
   )
 }
-
-
-
-
-
-
-
