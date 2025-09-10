@@ -1122,7 +1122,13 @@ export function SiteManagement() {
                                  ).length
                                 })
                             </TabsTrigger>
-                            <TabsTrigger value="off-site">Off Site</TabsTrigger>
+                            <TabsTrigger value="off-site">Off Site ({assignedOperatives.filter((o) =>assignments.some((a) =>String(a.siteId) === String(site.id) &&
+                            String(a.operativeId) === String(o.id) &&
+                            String(a.status).toUpperCase() === "OFFSITE"
+                                  )
+                                 ).length
+                                })
+                            </TabsTrigger>
                           </TabsList>
                         {/* ASSIGNED OPERATIVES TAB */}         
                           {/* ASSIGNED OPERATIVES TAB */}
