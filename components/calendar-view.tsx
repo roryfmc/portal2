@@ -126,11 +126,13 @@ export function CalendarView() {
   const assignedOnDate = (site: any, date: Date) => {
     const list = Array.isArray(site.operatives) ? site.operatives : []
     const d0 = new Date(date); d0.setHours(0, 0, 0, 0)
-    return list.filter((so: any) => {
-      const s = new Date(so.startDate); s.setHours(0, 0, 0, 0)
-      const e = new Date(so.endDate);   e.setHours(0, 0, 0, 0)
-      return d0 >= s && d0 <= e
-    }).length
+    return list
+      .filter((so: any) => String(so?.status || "").toUpperCase() !== "OFFSITE")
+      .filter((so: any) => {
+        const s = new Date(so.startDate); s.setHours(0, 0, 0, 0)
+        const e = new Date(so.endDate);   e.setHours(0, 0, 0, 0)
+        return d0 >= s && d0 <= e
+      }).length
   }
 
   // Base sites on date (no filter)
@@ -177,7 +179,12 @@ export function CalendarView() {
   const deployedNowCount = useMemo(() => {
     const ids = new Set(
       (assignments || [])
-        .filter((a: any) => isDateInRange(now, new Date(a.startDate), new Date(a.endDate)))
+        .filter((a: any) => String(a?.status || "").toUpperCase() !== "OFFSITE")
+        .filter(
+          (a: any) =>
+            String(a?.status || "").toUpperCase() === "DEPLOYED" ||
+            (!a.status && isDateInRange(now, new Date(a.startDate), new Date(a.endDate))),
+        )
         .map((a: any) => String(a.operativeId)),
     )
     return ids.size
@@ -496,6 +503,7 @@ export function CalendarView() {
                       {assigned > 0 ? (
                         <div className="flex flex-wrap gap-1">
                           {(site.operatives || [])
+                            .filter((so: any) => String(so?.status || "").toUpperCase() !== "OFFSITE")
                             .filter((so: any) => {
                               const s = new Date(so.startDate)
                               const e = new Date(so.endDate)

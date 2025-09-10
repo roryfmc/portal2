@@ -117,12 +117,17 @@ export function OperativeList({ onSelectOperative, onAddOperative }: OperativeLi
     return (hasAllAsbestos ? "success" : "warning") as const
   }
 
-  // Build a set of operativeIds currently deployed
+  // Build a set of operativeIds currently deployed (exclude OFFSITE)
   const deployedIds = useMemo(() => {
     const now = new Date()
     return new Set(
       (assignments || [])
-        .filter((a: any) => isDateInRange(now, new Date(a.startDate), new Date(a.endDate)))
+        .filter((a: any) => String(a?.status || "").toUpperCase() !== "OFFSITE")
+        .filter(
+          (a: any) =>
+            String(a?.status || "").toUpperCase() === "DEPLOYED" ||
+            (!a.status && isDateInRange(now, new Date(a.startDate), new Date(a.endDate))),
+        )
         .map((a: any) => String(a.operativeId)),
     )
   }, [assignments])
@@ -159,7 +164,12 @@ export function OperativeList({ onSelectOperative, onAddOperative }: OperativeLi
     const now = new Date()
     const ids = new Set(
       (assignments || [])
-        .filter((a: any) => isDateInRange(now, new Date(a.startDate), new Date(a.endDate)))
+        .filter((a: any) => String(a?.status || "").toUpperCase() !== "OFFSITE")
+        .filter(
+          (a: any) =>
+            String(a?.status || "").toUpperCase() === "DEPLOYED" ||
+            (!a.status && isDateInRange(now, new Date(a.startDate), new Date(a.endDate))),
+        )
         .map((a: any) => String(a.operativeId)),
     )
     return operatives.filter((op) => ids.has(String(op.id))).length

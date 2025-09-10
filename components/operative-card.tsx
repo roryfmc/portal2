@@ -95,10 +95,12 @@ export function OperativeCard({ operative, onEdit, onBack }: OperativeCardProps)
           return d >= s && d <= e
         }
         const current = (data as any[])
+          .filter((a) => String(a.operativeId) === String(operative.id))
+          .filter((a) => String(a?.status || "").toUpperCase() !== "OFFSITE")
           .filter(
             (a) =>
-              String(a.operativeId) === String(operative.id) &&
-              isDateInRange(now, new Date(a.startDate), new Date(a.endDate)),
+              String(a?.status || "").toUpperCase() === "DEPLOYED" ||
+              (!a.status && isDateInRange(now, new Date(a.startDate), new Date(a.endDate))),
           )
           .map((a) => ({
             siteName: (a as any)?.site?.name || "Unknown site",

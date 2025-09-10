@@ -214,26 +214,40 @@ export function SiteManagement() {
   }
 
   const getAssignedOperatives = (siteId: string) => {
-    const siteAssignments = assignments.filter((a) => a.siteId === siteId)
+    // Exclude OFFSITE from any site attachment listings
+    const siteAssignments = assignments.filter(
+      (a: any) => String(a.siteId) === String(siteId) && String(a?.status || "").toUpperCase() !== "OFFSITE",
+    )
     return siteAssignments
-      .map((a) => operatives.find((o) => o.id === a.operativeId))
+      .map((a) => operatives.find((o) => String(o.id) === String(a.operativeId)))
       .filter(Boolean) as Operative[]
   }
 
   const isOperativeDeployedThisWeek = (operativeId: string) => {
     const { start: weekStart, end: weekEnd } = getCurrentWeekRange()
     return assignments.some((a: any) => {
+      if (String(a?.status || "").toUpperCase() === "OFFSITE") return false
+      const isDeployed = String(a?.status || "").toUpperCase() === "DEPLOYED"
+      // Fallback to date overlap for legacy rows without status
       const aStart = new Date(a.startDate)
       const aEnd = new Date(a.endDate)
-      return String(a.operativeId) === String(operativeId) && aStart <= weekEnd && weekStart <= aEnd
+      const overlaps = aStart <= weekEnd && weekStart <= aEnd
+      return String(a.operativeId) === String(operativeId) && (isDeployed || (!a.status && overlaps))
     })
   }
 
   const isOperativeDeployedForCurrentRange = (operativeId: string) => {
     const start = formData.startDate ? new Date(formData.startDate) : editingSite?.startDate
     const end = formData.endDate ? new Date(formData.endDate) : editingSite?.endDate
+    const relevant = (a: any) => {
+      const status = String(a?.status || "").toUpperCase()
+      if (status === "OFFSITE") return false
+      // Consider ASSIGNED or DEPLOYED as blocking, legacy rows fallback to date overlap
+      return status === "ASSIGNED" || status === "DEPLOYED" || !a.status
+    }
     if (start && end) {
       return assignments.some((a: any) => {
+        if (!relevant(a)) return false
         const aStart = new Date(a.startDate)
         const aEnd = new Date(a.endDate)
         return String(a.operativeId) === String(operativeId) && aStart <= end && start <= aEnd
@@ -1024,7 +1038,12 @@ export function SiteManagement() {
 
                         <Tabs defaultValue="assigned" className="w-full">
                           <TabsList className="grid w-full grid-cols-3">
-                            <TabsTrigger value="assigned">Assigned ({assignedOperatives.length})</TabsTrigger>
+                            <TabsTrigger value="assigned">Assigned ({assignedOperatives.filter((o) =>assignments.some((a) =>String(a.siteId) === String(site.id) &&
+                            String(a.operativeId) === String(o.id) &&
+                            String(a.status).toUpperCase() === "ASSIGNED"
+                                  )
+                                 ).length
+                                })</TabsTrigger>
                             <TabsTrigger value="current">This Week ({assignedOperatives.filter((o) =>assignments.some((a) =>String(a.siteId) === String(site.id) &&
                             String(a.operativeId) === String(o.id) &&
                             String(a.status).toUpperCase() === "DEPLOYED"
@@ -1038,19 +1057,19 @@ export function SiteManagement() {
                           {/* ASSIGNED OPERATIVES TAB */}
                           <TabsContent value="assigned" className="space-y-2">
                             {(() => {
-                                // DEPLOYED ids for this site
-                                const activeIds = new Set(
+                                // Only ASSIGNED (future) for this site
+                                const assignedIdsStrict = new Set(
                                 assignments
                                     .filter(
                                     (a) =>
                                         String(a.siteId) === String(site.id) &&
-                                        String(a.status).toUpperCase() === "DEPLOYED"
+                                        String(a.status).toUpperCase() === "ASSIGNED"
                                     )
                                     .map((a) => String(a.operativeId))
                                 )
-                                // Only non-deployed (future) operatives
-                                const futureOps = assignedOperatives.filter(
-                                (o) => !activeIds.has(String(o.id))
+
+                                const assignedOpsOnly = assignedOperatives.filter((o) =>
+                                assignedIdsStrict.has(String(o.id))
                                 )
 
                                 return (
@@ -1073,8 +1092,8 @@ export function SiteManagement() {
                                     </Button>
                                     </div>
 
-                                    {futureOps.length > 0 ? (
-                                    futureOps.map((operative) => (
+                                    {assignedOpsOnly.length > 0 ? (
+                                    assignedOpsOnly.map((operative) => (
                                         <div
                                         key={operative.id}
                                         className="flex items-center justify-between bg-blue-50 p-3 rounded border-l-4 border-blue-400"
@@ -1089,7 +1108,6 @@ export function SiteManagement() {
                                         <div className="flex items-center gap-2">
                                             <Badge variant="outline" className="text-xs">Assigned</Badge>
 
-                                            {/* Actions */}
                                             <div className="flex gap-1">
                                             <Button
                                                 size="sm"
@@ -1113,7 +1131,7 @@ export function SiteManagement() {
                                                     const res = await fetch(`/api/assignments?id=${target.id}`, {
                                                     method: "PUT",
                                                     headers: { "Content-Type": "application/json" },
-                                                    body: JSON.stringify({ ...target, status: "DEPLOYED" }), // make ACTIVE
+                                                    body: JSON.stringify({ status: "DEPLOYED" }),
                                                     })
                                                     if (!res.ok) throw new Error("Failed to update assignment")
                                                     await fetchAssignments()
@@ -1179,6 +1197,7 @@ export function SiteManagement() {
                                 )
                             })()}
                           </TabsContent>
+
                         {/* CURRENT WEEK OPERATIVES TAB */} 
                           {/* CURRENT WEEK OPERATIVES TAB */}
                           <TabsContent value="current" className="space-y-2">
@@ -1240,7 +1259,7 @@ export function SiteManagement() {
                                                 const res = await fetch(`/api/assignments?id=${target.id}`, {
                                                 method: "PUT",
                                                 headers: { "Content-Type": "application/json" },
-                                                body: JSON.stringify({ ...target, status: "COMPLETED" }),
+                                                body: JSON.stringify({ status: "OFFSITE" }),
                                                 })
                                                 if (!res.ok) throw new Error("Failed to update assignment")
                                                 await fetchAssignments()
@@ -1385,11 +1404,19 @@ export function SiteManagement() {
                       </div>
                       {assignedOperatives.length > 0 ? (
                         <div className="flex flex-wrap gap-1">
-                          {assignedOperatives.slice(0, 6).map((op) => (
-                            <Badge key={op.id} variant="outline" className="text-xs">
-                              {op.personalDetails?.fullName || op.id}
-                            </Badge>
-                          ))}
+                          {assignedOperatives.slice(0, 6).map((op) => {
+                            const a = assignments.find(
+                              (asgn) => String(asgn.siteId) === String(site.id) && String(asgn.operativeId) === String(op.id),
+                            ) as any
+                            const raw = String(a?.status || "").toUpperCase()
+                            const label = raw === "DEPLOYED" ? "deployed" : raw === "ASSIGNED" ? "assigned" : "available"
+                            return (
+                              <Badge key={op.id} variant="outline" className="text-xs">
+                                {op.personalDetails?.fullName || op.id}
+                                <span className="ml-1 opacity-70">({label})</span>
+                              </Badge>
+                            )
+                          })}
                           {assignedOperatives.length > 6 && (
                             <Badge variant="outline" className="text-xs">+{assignedOperatives.length - 6} more</Badge>
                           )}
