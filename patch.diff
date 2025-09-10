@@ -1,0 +1,37 @@
+﻿*** Begin Patch
+*** Update File: components/site-management.tsx
+@@
+-                              if (isOperativeDeployedForCurrentRange(operative.id)) {
+-                                const displayName = operative.personalDetails?.fullName || operative.id
+-                                const ok = window.confirm(
+-                                  `${displayName} is already assigned during this timeframe. Assign to multiple sites?`,
+-                                )
+-                                if (!ok) return
+-                              // Check incompatibilities (client and operatives) and warn with note
+-                              const warnings = getIncompatibilityWarnings(operative)
+-                              if (warnings.length > 0) {
+-                                const confirmMsg = "Warning:" + warnings.join("") + "Assign anyway?"
+-                                const proceed = window.confirm(confirmMsg)
+-                                if (!proceed) return
+-                              }
+-                              }
+-                              setSelectedOperatives([...selectedOperatives, operative.id])
++                              if (isOperativeDeployedForCurrentRange(operative.id)) {
++                                const displayName = operative.personalDetails?.fullName || operative.id
++                                const ok = window.confirm(
++                                  `${displayName} is already assigned during this timeframe. Assign to multiple sites?`,
++                                )
++                                if (!ok) return
++                              }
++                              // Check incompatibilities (client and operatives) and block with toast
++                              const warnings = getIncompatibilityWarnings(operative)
++                              if (warnings.length > 0) {
++                                toast({
++                                  title: "Cannot assign operative",
++                                  description: warnings.join("\n"),
++                                  variant: "destructive",
++                                })
++                                return
++                              }
++                              setSelectedOperatives([...selectedOperatives, operative.id])
+*** End Patch

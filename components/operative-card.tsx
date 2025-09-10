@@ -29,6 +29,7 @@ import {
   Save,
   Upload,
   Trash2,
+  ShieldAlert,
 } from "lucide-react"
 import type { Operative } from "@/lib/types"
 import { toast } from "@/components/ui/use-toast"
@@ -44,6 +45,11 @@ export function OperativeCard({ operative, onEdit, onBack }: OperativeCardProps)
   const [activeTab, setActiveTab] = useState("personal")
   const [isDeleting, setIsDeleting] = useState(false)
   const [isDeployedNow, setIsDeployedNow] = useState(false)
+  const [uwOperativeNames, setUwOperativeNames] = useState<Record<string, string>>({})
+  const [uwClientNames, setUwClientNames] = useState<Record<number, string>>({} as any)
+  const [currentAssignments, setCurrentAssignments] = useState<
+    Array<{ siteName: string; startDate: string; endDate: string }>
+  >([])
   const [watermarking, setWatermarking] = useState<string | null>(null)
   const [savingCert, setSavingCert] = useState(false)
 
@@ -88,12 +94,21 @@ export function OperativeCard({ operative, onEdit, onBack }: OperativeCardProps)
           const e = new Date(end.getFullYear(), end.getMonth(), end.getDate())
           return d >= s && d <= e
         }
-        const deployed = (data as any[]).some(
-          (a) =>
-            String(a.operativeId) === String(operative.id) &&
-            isDateInRange(now, new Date(a.startDate), new Date(a.endDate)),
-        )
-        if (!ignore) setIsDeployedNow(deployed)
+        const current = (data as any[])
+          .filter(
+            (a) =>
+              String(a.operativeId) === String(operative.id) &&
+              isDateInRange(now, new Date(a.startDate), new Date(a.endDate)),
+          )
+          .map((a) => ({
+            siteName: (a as any)?.site?.name || "Unknown site",
+            startDate: String(a.startDate),
+            endDate: String(a.endDate),
+          }))
+        if (!ignore) {
+          setIsDeployedNow(current.length > 0)
+          setCurrentAssignments(current)
+        }
       } catch {}
     }
     load()
@@ -101,6 +116,41 @@ export function OperativeCard({ operative, onEdit, onBack }: OperativeCardProps)
       ignore = true
     }
   }, [operative.id])
+
+  // Load names for "Unable To Work With" targets
+  useEffect(() => {
+    const list: any[] = (operative as any)?.unableToWorkWith || []
+    if (!list.length) return
+    let ignore = false
+    const load = async () => {
+      try {
+        const [opsRes, clientsRes] = await Promise.all([
+          fetch("/api/operatives", { cache: "no-store" }),
+          fetch("/api/clients", { cache: "no-store" }).catch(() => null),
+        ])
+        if (!ignore && opsRes?.ok) {
+          const ops = await opsRes.json()
+          const map: Record<string, string> = {}
+          ;(ops || []).forEach((o: any) => {
+            map[String(o.id)] = o?.personalDetails?.fullName || "Unnamed"
+          })
+          setUwOperativeNames(map)
+        }
+        if (!ignore && clientsRes && clientsRes.ok) {
+          const cls = await clientsRes.json()
+          const cmap: Record<number, string> = {} as any
+          ;(cls || []).forEach((c: any) => {
+            cmap[Number(c.id)] = c?.name || "Unknown client"
+          })
+          setUwClientNames(cmap)
+        }
+      } catch {}
+    }
+    load()
+    return () => {
+      ignore = true
+    }
+  }, [operative.unableToWorkWith])
 
   const getInitials = (name?: string) =>
     (name ?? "")
@@ -319,10 +369,25 @@ export function OperativeCard({ operative, onEdit, onBack }: OperativeCardProps)
                 </Badge>
               </div>
 
-              <div className="flex items-center gap-2 mt-1">
+              <div className="flex flex-wrap items-center gap-2 mt-1">
                 <Badge variant={isDeployedNow ? "destructive" : "default"} className="text-sm">
                   {isDeployedNow ? "Deployed" : "Available"}
                 </Badge>
+                {isDeployedNow && currentAssignments.length > 0 && (
+                  <span className="text-sm text-muted-foreground">
+                    {currentAssignments.length === 1 ? (
+                      <>
+                        to {currentAssignments[0].siteName} 
+                        • {formatDate(currentAssignments[0].startDate)} – {formatDate(currentAssignments[0].endDate)}
+                      </>
+                    ) : (
+                      <>
+                        to {currentAssignments.map((a) => a.siteName).join(", ")} 
+                        • multiple assignments
+                      </>
+                    )}
+                  </span>
+                )}
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
@@ -359,8 +424,8 @@ export function OperativeCard({ operative, onEdit, onBack }: OperativeCardProps)
       </Card>
 
       {/* Tabbed Content */}
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-        <TabsList className="grid w-full grid-cols-6">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-7">
+        <TabsList className="grid w-full grid-cols-7">
           <TabsTrigger value="personal" className="flex items-center gap-2">
             <User className="w-4 h-4" />
             <span className="hidden sm:inline">Personal</span>
@@ -384,6 +449,10 @@ export function OperativeCard({ operative, onEdit, onBack }: OperativeCardProps)
           <TabsTrigger value="availability" className="flex items-center gap-2">
             <Calendar className="w-4 h-4" />
             <span className="hidden sm:inline">Availability</span>
+          </TabsTrigger>
+          <TabsTrigger value="unable" className="flex items-center gap-2">
+            <ShieldAlert className="w-4 h-4" />
+            <span className="hidden sm:inline">Unable To Work With</span>
           </TabsTrigger>
         </TabsList>
 
@@ -820,6 +889,45 @@ export function OperativeCard({ operative, onEdit, onBack }: OperativeCardProps)
                       </Badge>
                     ))}
                   </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Unable To Work With */}
+        <TabsContent value="unable">
+          <Card className="mt-4">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <AlertTriangle className="w-5 h-5 text-amber-600" />
+                Unable To Work With
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {((operative as any)?.unableToWorkWith || []).length === 0 ? (
+                <p className="text-muted-foreground text-sm">No restrictions recorded.</p>
+              ) : (
+                <div className="space-y-2">
+                  {((operative as any)?.unableToWorkWith || []).map((u: any) => {
+                    const isClient = u?.targetType === "CLIENT" || (u?.type === "client")
+                    const label = isClient
+                      ? (u?.targetClientId != null ? (uwClientNames as any)?.[Number(u.targetClientId)] : "Unknown client")
+                      : (u?.targetOperativeId ? uwOperativeNames[String(u.targetOperativeId)] : "Unknown operative")
+                    return (
+                      <div key={u.id} className="flex items-start justify-between border rounded-md p-3">
+                        <div className="flex items-center gap-2">
+                          {isClient ? <Building className="w-4 h-4 text-primary" /> : <Users className="w-4 h-4 text-primary" />}
+                          <span className="text-sm font-medium">
+                            {isClient ? "Client" : "Operative"}: {label}
+                          </span>
+                        </div>
+                        {u?.note && (
+                          <span className="text-xs text-muted-foreground ml-4">{u.note}</span>
+                        )}
+                      </div>
+                    )
+                  })}
                 </div>
               )}
             </CardContent>

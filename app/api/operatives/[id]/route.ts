@@ -12,7 +12,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     const id = params.id // âš ï¸ string UUID â€” do NOT cast to Number
     const body = await request.json()
 
-    const { trade, personalDetails, nextOfKin, rightToWork, availability, complianceCertificates } = body ?? {}
+    const { trade, personalDetails, nextOfKin, rightToWork, availability, complianceCertificates, unableToWorkWith } = body ?? {}
 
     const updated = await prisma.operative.update({
       where: { id },
@@ -149,6 +149,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
         rightToWork: true,
         availability: true,
         complianceCertificates: true,
+        unableToWorkWith: true,
         workSites: true,
       },
     })
@@ -218,6 +219,38 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
       }
     }
 
+    // Replace UnableToWorkWith if provided
+    if (Array.isArray(unableToWorkWith)) {
+      const base = unableToWorkWith
+        .filter((u: any) => u && (u.type || u.targetType) && (u.id || u.targetOperativeId || u.targetClientId))
+        .map((u: any) => ({
+          operativeId: id,
+          targetType: (u.type || u.targetType) === "client" || (u.type || u.targetType) === "CLIENT" ? "CLIENT" : "OPERATIVE",
+          targetOperativeId:
+            (u.type || u.targetType) === "operative" || (u.type || u.targetType) === "OPERATIVE"
+              ? String(u.id || u.targetOperativeId)
+              : null,
+          targetClientId:
+            (u.type || u.targetType) === "client" || (u.type || u.targetType) === "CLIENT"
+              ? Number(u.id || u.targetClientId)
+              : null,
+          note: typeof u.note === "string" ? u.note : null,
+        }))
+
+      try {
+        await prisma.$transaction([
+          prisma.unableToWorkWith.deleteMany({ where: { operativeId: id } }),
+          ...(base.length ? [prisma.unableToWorkWith.createMany({ data: base as any })] : []),
+        ])
+      } catch (e) {
+        // fallback create one by one if createMany fails for any reason
+        await prisma.unableToWorkWith.deleteMany({ where: { operativeId: id } })
+        for (const row of base) {
+          try { await prisma.unableToWorkWith.create({ data: row as any }) } catch {}
+        }
+      }
+    }
+
       // Normalize expired certificates to INVALID status
       try {
         const now = new Date(); now.setHours(0,0,0,0)
@@ -234,6 +267,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
         rightToWork: true,
         availability: true,
         complianceCertificates: true,
+        unableToWorkWith: true,
         workSites: true,
       },
     })

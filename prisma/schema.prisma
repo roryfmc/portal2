@@ -1,17 +1,228 @@
-// schema.prisma
-
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "postgresql" // Needed for scalar lists like String[]
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
-/* =========================
-   Enums
-   ========================= */
+model Operative {
+  id                     String                  @id @default(uuid())
+  trade                  String?
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+  availability           Availability?
+  complianceCertificates ComplianceCertificate[]
+  nextOfKin              NextOfKin?
+  personalDetails        PersonalDetails?
+  rightToWork            RightToWork?
+  siteAssignments        SiteAssignment[]
+  siteLinks              SiteOperative[]
+  timeOffRequests        TimeOffRequest[]
+  unableToWorkWith       UnableToWorkWith[]      @relation("UnworkableSourceOperative")
+  unworkableAsTarget     UnableToWorkWith[]      @relation("UnworkableTargetOperative")
+  workSites              WorkSite[]
+
+  @@index([trade])
+}
+
+model UnableToWorkWith {
+  id                String           @id @default(uuid())
+  operativeId       String
+  targetType        UnableTargetType
+  targetOperativeId String?
+  targetClientId    Int?
+  note              String?
+  createdAt         DateTime         @default(now())
+  operative         Operative        @relation("UnworkableSourceOperative", fields: [operativeId], references: [id], onDelete: Cascade)
+  targetClient      Client?          @relation("UnworkableTargetClient", fields: [targetClientId], references: [id])
+  targetOperative   Operative?       @relation("UnworkableTargetOperative", fields: [targetOperativeId], references: [id])
+
+  @@index([operativeId])
+  @@index([targetClientId])
+  @@index([targetOperativeId])
+}
+
+model PersonalDetails {
+  id                String         @id @default(uuid())
+  fullName          String
+  email             String         @unique
+  phone             String
+  address           String
+  dateOfBirth       DateTime
+  nationalInsurance String
+  employmentType    EmploymentType
+  payrollNumber     String
+  operativeId       String         @unique
+  operative         Operative      @relation(fields: [operativeId], references: [id], onDelete: Cascade)
+}
+
+model NextOfKin {
+  id           String    @id @default(uuid())
+  name         String
+  relationship String
+  phone        String
+  email        String?
+  address      String
+  operativeId  String    @unique
+  operative    Operative @relation(fields: [operativeId], references: [id], onDelete: Cascade)
+}
+
+model RightToWork {
+  id          String            @id @default(uuid())
+  country     String
+  status      RightToWorkStatus
+  documentUrl String?
+  expiryDate  DateTime?
+  operativeId String            @unique
+  operative   Operative         @relation(fields: [operativeId], references: [id], onDelete: Cascade)
+}
+
+model WorkSite {
+  id          String    @id @default(uuid())
+  siteName    String
+  location    String
+  startDate   DateTime
+  endDate     DateTime?
+  role        String
+  contractor  String
+  operativeId String
+  operative   Operative @relation(fields: [operativeId], references: [id], onDelete: Cascade)
+
+  @@index([operativeId])
+  @@index([siteName])
+}
+
+model ComplianceCertificate {
+  id                 String             @id @default(uuid())
+  name               String
+  issuer             String?
+  issueDate          DateTime?
+  expiryDate         DateTime
+  status             CertificateStatus?
+  documentUrl        String?
+  operativeId        String
+  notes              String?
+  certType           CertificateType    @default(GENERAL)
+  certificateDetails String?
+  contact            String?
+  dateVerified       DateTime?
+  trainingProvider   String?
+  verifiedBy         String?
+  verifiedWith       String?
+  operative          Operative          @relation(fields: [operativeId], references: [id], onDelete: Cascade)
+
+  @@index([operativeId])
+  @@index([status])
+  @@index([expiryDate])
+}
+
+model TimeOffRequest {
+  id          String        @id @default(uuid())
+  startDate   DateTime
+  endDate     DateTime
+  reason      String
+  status      TimeOffStatus @default(PENDING)
+  operativeId String
+  operative   Operative     @relation(fields: [operativeId], references: [id], onDelete: Cascade)
+
+  @@index([operativeId])
+  @@index([status])
+  @@index([startDate, endDate])
+}
+
+model Availability {
+  id               String     @id @default(uuid())
+  mondayToFriday   Boolean
+  saturday         Boolean
+  sunday           Boolean
+  nightShifts      Boolean
+  unavailableDates DateTime[]
+  operativeId      String     @unique
+  operative        Operative  @relation(fields: [operativeId], references: [id], onDelete: Cascade)
+}
+
+model Client {
+  id                 Int                @id @default(autoincrement())
+  name               String
+  email              String             @unique
+  phone              String?
+  company            String
+  contactPerson      String
+  createdAt          DateTime           @default(now())
+  jobTypes           ClientJobType[]
+  sites              ConstructionSite[]
+  unworkableAsTarget UnableToWorkWith[] @relation("UnworkableTargetClient")
+}
+
+model ConstructionSite {
+  id             String           @id @default(uuid())
+  name           String
+  address        String
+  clientId       Int
+  projectType    String
+  startDate      DateTime
+  endDate        DateTime
+  requiredTrades String[]
+  maxOperatives  Int
+  createdAt      DateTime         @default(now())
+  status         String
+  client         Client           @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  assignments    SiteAssignment[]
+  operatives     SiteOperative[]
+
+  @@index([clientId])
+  @@index([status])
+  @@index([startDate, endDate])
+}
+
+model SiteAssignment {
+  id          String           @id @default(uuid())
+  operativeId String
+  siteId      String
+  startDate   DateTime
+  endDate     DateTime
+  trade       String
+  dailyRate   Decimal          @db.Decimal(10, 2)
+  notes       String?
+  createdAt   DateTime         @default(now())
+  status      AssignmentStatus @default(SCHEDULED)
+  operative   Operative        @relation(fields: [operativeId], references: [id], onDelete: Cascade)
+  site        ConstructionSite @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@index([operativeId])
+  @@index([siteId])
+  @@index([status])
+  @@index([startDate, endDate])
+}
+
+model SiteOperative {
+  id          Int              @id @default(autoincrement())
+  siteId      String
+  operativeId String
+  startDate   DateTime
+  endDate     DateTime
+  operative   Operative        @relation(fields: [operativeId], references: [id], onDelete: Cascade)
+  site        ConstructionSite @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@unique([siteId, operativeId, startDate])
+  @@index([siteId])
+  @@index([operativeId])
+}
+
+model ClientJobType {
+  id         Int      @id @default(autoincrement())
+  clientId   Int
+  name       String
+  payRate    Decimal  @db.Decimal(10, 2)
+  clientCost Decimal  @db.Decimal(10, 2)
+  createdAt  DateTime @default(now())
+  client     Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([clientId])
+  @@index([name])
+}
 
 enum EmploymentType {
   SELF_EMPLOYED
@@ -33,10 +244,14 @@ enum CertificateStatus {
   INVALID
 }
 
-// Type/kind of certificate for UI categorization
 enum CertificateType {
   GENERAL
   ASBESTOS
+}
+
+enum UnableTargetType {
+  OPERATIVE
+  CLIENT
 }
 
 enum TimeOffStatus {
@@ -45,244 +260,9 @@ enum TimeOffStatus {
   REJECTED
 }
 
-// enum OperativeStatus removed — operative status is derived from assignments
-
 enum AssignmentStatus {
   SCHEDULED
   ACTIVE
   COMPLETED
   CANCELLED
-}
-
-/* =========================
-   Core Models
-   ========================= */
-
-model Operative {
-  id                     String                   @id @default(uuid())
-  trade                  String?
-
-  // Relations
-  personalDetails        PersonalDetails?
-  nextOfKin              NextOfKin?
-  rightToWork            RightToWork?
-  availability           Availability?
-  workSites              WorkSite[]
-  complianceCertificates ComplianceCertificate[]
-  timeOffRequests        TimeOffRequest[]
-  siteAssignments        SiteAssignment[]
-  siteLinks              SiteOperative[]          // lightweight join entries
-
-  createdAt              DateTime                 @default(now())
-  updatedAt              DateTime                 @updatedAt
-
-  @@index([trade])
-}
-
-model PersonalDetails {
-  id               String          @id @default(uuid())
-  fullName         String
-  email            String          @unique
-  phone            String
-  address          String
-  dateOfBirth      DateTime
-  nationalInsurance String
-  employmentType   EmploymentType
-  payrollNumber    String
-
-  // 1-1 back to Operative
-  operativeId      String          @unique
-  operative        Operative       @relation(fields: [operativeId], references: [id], onDelete: Cascade)
-}
-
-model NextOfKin {
-  id           String    @id @default(uuid())
-  name         String
-  relationship String
-  phone        String
-  email        String?
-  address      String
-
-  operativeId  String    @unique
-  operative    Operative @relation(fields: [operativeId], references: [id], onDelete: Cascade)
-}
-
-model RightToWork {
-  id           String            @id @default(uuid())
-  country      String
-  status       RightToWorkStatus
-  documentUrl  String?
-  expiryDate   DateTime?
-
-  operativeId  String            @unique
-  operative    Operative         @relation(fields: [operativeId], references: [id], onDelete: Cascade)
-}
-
-model WorkSite {
-  id           String    @id @default(uuid())
-  siteName     String
-  location     String
-  startDate    DateTime
-  endDate      DateTime?
-  role         String
-  contractor   String
-
-  operativeId  String
-  operative    Operative @relation(fields: [operativeId], references: [id], onDelete: Cascade)
-
-  @@index([operativeId])
-  @@index([siteName])
-}
-
-model ComplianceCertificate {
-  id           String            @id @default(uuid())
-  name         String
-  issuer       String?
-  issueDate    DateTime?
-  expiryDate   DateTime
-  status       CertificateStatus?
-  documentUrl  String?
-  notes        String?
-  certType     CertificateType   @default(GENERAL)
-
-  // Unified fields for both general and asbestos
-  trainingProvider  String?
-  contact           String?
-  certificateDetails String?
-  verifiedWith      String?
-  verifiedBy        String?
-  dateVerified      DateTime?
-
-  operativeId  String
-  operative    Operative         @relation(fields: [operativeId], references: [id], onDelete: Cascade)
-
-  @@index([operativeId])
-  @@index([status])
-  @@index([expiryDate])
-}
-
-model TimeOffRequest {
-  id           String         @id @default(uuid())
-  startDate    DateTime
-  endDate      DateTime
-  reason       String
-  status       TimeOffStatus  @default(PENDING)
-
-  operativeId  String
-  operative    Operative      @relation(fields: [operativeId], references: [id], onDelete: Cascade)
-
-  @@index([operativeId])
-  @@index([status])
-  @@index([startDate, endDate])
-}
-
-model Availability {
-  id               String   @id @default(uuid())
-  mondayToFriday   Boolean
-  saturday         Boolean
-  sunday           Boolean
-  nightShifts      Boolean
-
-  // Scalar list requires PostgreSQL/Cockroach
-  unavailableDates DateTime[]
-
-  operativeId      String   @unique
-  operative        Operative @relation(fields: [operativeId], references: [id], onDelete: Cascade)
-}
-
-/* =========================
-   Sites & Clients
-   ========================= */
-
-model Client {
-  id            Int               @id @default(autoincrement())
-  name          String
-  email         String
-  phone         String?
-  company       String
-  contactPerson String
-  createdAt     DateTime          @default(now())
-
-  sites         ConstructionSite[]
-  jobTypes      ClientJobType[]
-
-  @@unique([email])
-}
-
-model ConstructionSite {
-  id             String            @id @default(uuid())
-  name           String
-  address        String
-  clientId       Int
-  projectType    String
-  startDate      DateTime
-  endDate        DateTime
-  status         String     
-  requiredTrades String[]          // PostgreSQL scalar list
-  maxOperatives  Int
-  createdAt      DateTime          @default(now())
-
-  client         Client            @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  operatives     SiteOperative[]
-  assignments    SiteAssignment[]
-
-  @@index([clientId])
-  @@index([status])
-  @@index([startDate, endDate])
-}
-
-/* =========================
-   Assignments / Joins
-   ========================= */
-
-// Rich many-to-many with attributes (preferred)
-model SiteAssignment {
-  id         String            @id @default(uuid())
-  operative  Operative         @relation(fields: [operativeId], references: [id], onDelete: Cascade)
-  operativeId String
-  site       ConstructionSite  @relation(fields: [siteId], references: [id], onDelete: Cascade)
-  siteId     String
-
-  startDate  DateTime
-  endDate    DateTime
-  trade      String
-  dailyRate  Decimal           @db.Decimal(10,2)
-  status     AssignmentStatus  @default(SCHEDULED)
-  notes      String?
-  createdAt  DateTime          @default(now())
-
-  @@index([operativeId])
-  @@index([siteId])
-  @@index([status])
-  @@index([startDate, endDate])
-}
-
-// Lightweight join (matches your SiteOperative type)
-model SiteOperative {
-  id          Int               @id @default(autoincrement())
-  site        ConstructionSite  @relation(fields: [siteId], references: [id], onDelete: Cascade)
-  siteId      String
-  operative   Operative         @relation(fields: [operativeId], references: [id], onDelete: Cascade)
-  operativeId String
-
-  startDate   DateTime
-  endDate     DateTime
-
-  @@index([siteId])
-  @@index([operativeId])
-  @@unique([siteId, operativeId, startDate]) // avoid duplicates across periods
-}
-
-// Job types and charge rates associated with a client
-model ClientJobType {
-  id         Int      @id @default(autoincrement())
-  clientId   Int
-  client     Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  name       String
-  payRate    Decimal  @db.Decimal(10, 2)
-  clientCost Decimal  @db.Decimal(10, 2)
-  createdAt  DateTime @default(now())
-
-  @@index([clientId])
-  @@index([name])
 }

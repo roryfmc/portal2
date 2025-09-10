@@ -70,6 +70,12 @@ export function OperativeList({ onSelectOperative, onAddOperative }: OperativeLi
     return d >= s && d <= e
   }
 
+  function formatDate(value: any) {
+    const d = new Date(value)
+    if (isNaN(d.getTime())) return ""
+    return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })
+  }
+
   // Compliance status helper (hoisted via function declaration)
   function getComplianceStatus(operative: Operative) {
     const list = operative.complianceCertificates ?? []
@@ -384,11 +390,11 @@ export function OperativeList({ onSelectOperative, onAddOperative }: OperativeLi
                         {operative.personalDetails?.fullName ?? "Unnamed operative"}
                       </h3>
                       <Badge variant="outline" className="text-xs">
-                        {operative.personalDetails?.payrollNumber ?? "—"}
+                        {operative.personalDetails?.phone ?? "—"}
                       </Badge>
                     </div>
 
-                    <div className="flex items-center gap-6 text-sm text-muted-foreground">
+                    <div className="flex items-center gap-6 text-sm text-muted-foreground hidden">
                       <span>{operative.personalDetails?.email ?? "—"}</span>
                       <span>{operative.personalDetails?.phone ?? "—"}</span>
                       <span className="capitalize">
@@ -396,6 +402,41 @@ export function OperativeList({ onSelectOperative, onAddOperative }: OperativeLi
                           ? operative.personalDetails.employmentType.toLowerCase()
                           : "—"}
                       </span>
+                    </div>
+                    <div className="flex items-center gap-6 text-sm text-muted-foreground">
+                      <span>{operative.personalDetails?.phone ?? ""}</span>
+                      <div className="flex items-center gap-2">
+                        <Badge
+                          variant={deployedIds.has(String(operative.id)) ? "destructive" : "secondary"}
+                          className="text-[11px]"
+                        >
+                          {deployedIds.has(String(operative.id)) ? "Deployed" : "Available"}
+                        </Badge>
+                        {deployedIds.has(String(operative.id)) && (() => {
+                          const now = new Date()
+                          const current = (assignments || [])
+                            .filter((a: any) =>
+                              String(a.operativeId) === String(operative.id) &&
+                              isDateInRange(now, new Date(a.startDate), new Date(a.endDate)),
+                            )
+                          if (current.length === 0) return null
+                          if (current.length === 1) {
+                            const a = current[0]
+                            const siteName = a?.site?.name || "Unknown site"
+                            return (
+                              <span className="text-xs text-muted-foreground">
+                                to {siteName} • {formatDate(a.startDate)} – {formatDate(a.endDate)}
+                              </span>
+                            )
+                          }
+                          const names = current.map((a: any) => a?.site?.name || "Unknown").join(", ")
+                          return (
+                            <span className="text-xs text-muted-foreground">
+                              to {names} • multiple assignments
+                            </span>
+                          )
+                        })()}
+                      </div>
                     </div>
                   </div>
 

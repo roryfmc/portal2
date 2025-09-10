@@ -55,8 +55,15 @@ export interface Operative {
   personalDetails?: PersonalDetails
   complianceCertificates: ComplianceCertificate[]
   workSites: WorkSite[]
+  nextOfKin?: NextOfKin | null
+  rightToWork?: RightToWork | null
+  availability?: Availability | null
+  timeOffRequests?: TimeOffRequest[]
+  siteAssignments?: SiteAssignment[]
+  siteLinks?: any[]
   createdAt: string
   updatedAt: string
+  unableToWorkWith?: UnableToWorkWith[]
 }
 
 export interface NextOfKin {
@@ -67,11 +74,13 @@ export interface NextOfKin {
   address: string
 }
 
+export type RightToWorkStatus = "VERIFIED" | "PENDING" | "EXPIRED" | "NOT_PROVIDED"
+
 export interface RightToWork {
   country: string
-  status: "Verified" | "Pending" | "Expired" | "Not Provided"
-  documentUrl?: string
-  expiryDate?: string
+  status: RightToWorkStatus
+  documentUrl?: string | null
+  expiryDate?: string | null
 }
 
 
@@ -98,7 +107,7 @@ export interface ConstructionSite {
   id: string
   name: string
   address: string
-  clientId: string
+  clientId: number
   projectType: string
   startDate: Date
   endDate: Date
@@ -111,12 +120,12 @@ export interface ConstructionSite {
 
 export type SiteOperative = {
   id: number
-  siteId: number
-  operativeId: number
+  siteId: string
+  operativeId: string
   startDate: string
   endDate: string
   operative: {
-    id: number
+    id: string
     name: string
     email: string
     phone?: string
@@ -137,6 +146,18 @@ export interface Client {
   createdAt: Date
   sites: ConstructionSite[]
   jobTypes?: ClientJobType[]
+}
+
+export type UnableTargetType = "OPERATIVE" | "CLIENT"
+
+export interface UnableToWorkWith {
+  id: string
+  operativeId: string
+  targetType: UnableTargetType
+  targetOperativeId?: string | null
+  targetClientId?: number | null
+  note?: string | null
+  createdAt?: string | Date
 }
 
 export interface ClientJobType {

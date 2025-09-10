@@ -23,6 +23,7 @@ export async function GET() {
       include: {
         personalDetails: true,
         complianceCertificates: true,
+        unableToWorkWith: true,
         workSites: true,
         nextOfKin: true,
         rightToWork: true,
@@ -45,7 +46,7 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { trade, personalDetails, nextOfKin, rightToWork, availability, complianceCertificates } = body ?? {}
+    const { trade, personalDetails, nextOfKin, rightToWork, availability, complianceCertificates, unableToWorkWith } = body ?? {}
 
     if (!personalDetails?.fullName || !personalDetails?.email) {
       return NextResponse.json(
@@ -156,6 +157,26 @@ export async function POST(request: NextRequest) {
               },
             }
           : {}),
+        ...(Array.isArray(unableToWorkWith) && unableToWorkWith.length
+          ? {
+              unableToWorkWith: {
+                create: unableToWorkWith
+                  .filter((u: any) => u && (u.type || u.targetType))
+                  .map((u: any) => ({
+                    targetType: (u.type || u.targetType) === "client" || (u.type || u.targetType) === "CLIENT" ? "CLIENT" : "OPERATIVE",
+                    targetOperativeId:
+                      (u.type || u.targetType) === "operative" || (u.type || u.targetType) === "OPERATIVE"
+                        ? String(u.id || u.targetOperativeId)
+                        : null,
+                    targetClientId:
+                      (u.type || u.targetType) === "client" || (u.type || u.targetType) === "CLIENT"
+                        ? Number(u.id || u.targetClientId)
+                        : null,
+                    note: typeof u.note === "string" ? u.note : null,
+                  })),
+              },
+            }
+          : {}),
       },
 
       include: {
@@ -164,6 +185,7 @@ export async function POST(request: NextRequest) {
         rightToWork: true,
         availability: true,
         complianceCertificates: true,
+        unableToWorkWith: true,
         workSites: true,
       },
     })

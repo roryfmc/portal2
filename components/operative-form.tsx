@@ -1,6 +1,6 @@
-"use client"
+﻿"use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useState } from "react"
 import type React from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -11,9 +11,9 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
-import { User, Users, FileText, Upload, Building, Shield, Calendar, Save, X, Plus, Trash2, Briefcase } from "lucide-react"
+import { User, Users, FileText, Upload, Building, Shield, Calendar, Save, X, Plus, Trash2, AlertTriangle, ShieldAlert } from "lucide-react"
 import { DocumentUpload } from "@/components/document-upload"
-import type { Operative, WorkSite, ComplianceCertificate, TimeOffRequest } from "@/lib/types"
+import type { Operative, WorkSite, ComplianceCertificate, TimeOffRequest, Client } from "@/lib/types"
 import { toast } from "@/components/ui/use-toast"
 
 interface OperativeFormProps {
@@ -125,6 +125,90 @@ export function OperativeForm({ operative, onSave, onCancel }: OperativeFormProp
     status: "VALID" as const,
     documentUrl: "",
   })
+
+  // Unable to Work With: data sources and selections
+  // Inside your component function:
+
+// Unable to Work With: data sources and selections
+const [uwType, setUwType] = useState<"operative" | "client">("operative")
+const [uwId, setUwId] = useState<string>("")
+const [uwItems, setUwItems] = useState<Array<{ type: "operative" | "client"; id: string; note?: string }>>([])
+const [uwOperatives, setUwOperatives] = useState<Array<{ id: string; name: string }>>([])
+const [uwClients, setUwClients] = useState<Array<{ id: string; name: string }>>([])
+const [uwNote, setUwNote] = useState<string>("")
+// Guard against undefined operative when adding a new one
+const selfOperativeId = operative?.id
+const isSelfId = (id: string) => (selfOperativeId ? String(id) === String(selfOperativeId) : false)
+const isSelfSelected = uwType === "operative" && isSelfId(uwId)
+
+  // Preload existing restrictions when editing
+  useEffect(() => {
+    const list = (operative as any)?.unableToWorkWith as any[] | undefined
+    if (Array.isArray(list) && list.length) {
+      setUwItems(
+        list.map((u) => ({
+          type: (u.targetType === "CLIENT" ? "client" : "operative") as any,
+          id: String(u.targetType === "CLIENT" ? u.targetClientId : u.targetOperativeId || ""),
+          note: u.note || undefined,
+        })).filter((x) => x.id),
+      )
+    }
+  }, [operative])
+
+useEffect(() => {
+  let ignore = false
+  const load = async () => {
+    try {
+      const [opsRes, clientsRes] = await Promise.all([
+        fetch("/api/operatives", { cache: "no-store" }),
+        fetch("/api/clients", { cache: "no-store" }),
+      ])
+      if (opsRes.ok) {
+        const ops = (await opsRes.json()) as Operative[]
+        const mapped = (ops || []).map((o) => ({ id: String(o.id), name: o.personalDetails?.fullName || "Unnamed" }))
+        if (!ignore) setUwOperatives(mapped)
+      }
+      if (clientsRes.ok) {
+        const clis = (await clientsRes.json()) as Client[]
+        const mapped = (clis || []).map((c) => ({ id: String(c.id), name: c.name }))
+        if (!ignore) setUwClients(mapped)
+      }
+    } catch (e) {
+      console.error("Failed to load UW lists", e)
+    }
+  }
+  load()
+  return () => {
+    ignore = true
+  }
+}, [])
+
+const labelForUw = (item: { type: "operative" | "client"; id: string }) => {
+  if (item.type === "operative") {
+    const o = uwOperatives.find((x) => String(x.id) === String(item.id))
+    return o?.name || `Operative ${item.id}`
+  }
+  const c = uwClients.find((x) => String(x.id) === String(item.id))
+  return c?.name || `Client ${item.id}`
+}
+
+const addUwItem = () => {
+  if (!uwId) return
+  if (uwType === "operative" && isSelfId(uwId)) return // block self
+  const exists = uwItems.some((i) => i.type === uwType && String(i.id) === String(uwId))
+  if (exists) return
+
+  setUwItems((prev) => [...prev, { type: uwType, id: uwId, note: uwNote.trim() || undefined }])
+  setUwId("")
+  setUwNote("")
+}
+const removeUwItem = (type: "operative" | "client", id: string) => {
+  setUwItems((prev) => prev.filter((i) => !(i.type === type && String(i.id) === String(id))))
+}
+
+
+
+  
 
   // ---------- Local form state (keeps full model shape for UI),
   // but only submits fields supported by current API (personalDetails + related) ----------
@@ -312,6 +396,11 @@ export function OperativeForm({ operative, onSave, onCancel }: OperativeFormProp
         nightShifts: formData.availability.nightShifts,
         unavailableDates: (formData.availability.unavailableDates || []) as any,
       },
+      unableToWorkWith: uwItems.map((u) => ({
+        type: u.type,
+        id: u.id,
+        note: u.note,
+      })),
     }
 
     try {
@@ -732,8 +821,8 @@ export function OperativeForm({ operative, onSave, onCancel }: OperativeFormProp
       {/* Top-level fields removed: trade and status are no longer collected here */}
 
       {/* Form Tabs */}
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-        <TabsList className="grid w-full grid-cols-6">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-7">
+        <TabsList className="grid w-full grid-cols-7">
           <TabsTrigger value="personal" className="flex items-center gap-2">
             <User className="w-4 h-4" />
             <span className="hidden sm:inline">Personal</span>
@@ -757,6 +846,10 @@ export function OperativeForm({ operative, onSave, onCancel }: OperativeFormProp
           <TabsTrigger value="availability" className="flex items-center gap-2">
             <Calendar className="w-4 h-4" />
             <span className="hidden sm:inline">Availability</span>
+          </TabsTrigger>
+          <TabsTrigger value="unable" className="flex items-center gap-2">
+            <ShieldAlert className="w-4 h-4" />
+            <span className="hidden sm:inline">Unable To Work With</span>
           </TabsTrigger>
         </TabsList>
 
@@ -1333,8 +1426,9 @@ export function OperativeForm({ operative, onSave, onCancel }: OperativeFormProp
                       </Button>
                     </div>
                   </>
-                </div>
-            )}
+                )}
+              </div>
+              )}
               {formData.complianceCertificates.length > 0 && (
                 <div className="space-y-6">
                   {formData.complianceCertificates.map((cert: any, index: number) => (
@@ -1619,10 +1713,130 @@ export function OperativeForm({ operative, onSave, onCancel }: OperativeFormProp
             </CardContent>
           </Card>
         </TabsContent>
+
+        {/* Unable To Work With */}
+        <TabsContent value="unable">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Calendar className="w-5 h-5" />
+                Unable To Work With
+              </CardTitle>
+            </CardHeader>
+
+            <CardContent>
+              <div className="space-y-4 border-t pt-4">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-600" />
+                  <Label className="text-base font-semibold">Unable to Work With</Label>
+                </div>
+                <p className="text-sm text-slate-600">
+                  Select operatives or clients this person cannot work with on the same site, and add a brief note.
+                </p>
+
+                <div className="flex flex-col sm:flex-row gap-2">
+                  {/* Type */}
+                  <Select value={uwType} onValueChange={(v) => setUwType(v as "operative" | "client")}>
+                    <SelectTrigger className="w-full sm:w-36">
+                      <SelectValue placeholder="Type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="operative">Operative</SelectItem>
+                      <SelectItem value="client">Client</SelectItem>
+                    </SelectContent>
+                  </Select>
+
+                  {/* Target */}
+                  <Select value={uwId} onValueChange={(v) => setUwId(v)} key={`uw-${uwType}`}>
+                    <SelectTrigger className="flex-1">
+                      <SelectValue placeholder={uwType === "operative" ? "Select operative" : "Select client"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {uwType === "operative" ? (
+                        (uwOperatives?.length ?? 0) > 0 ? (
+                          uwOperatives
+                            .filter((o) => !isSelfId(o.id)) // <-- exclude the operative being edited
+                            .map((o) => (
+                              <SelectItem key={o.id} value={o.id}>
+                                {o.name}
+                              </SelectItem>
+                            ))
+                        ) : (
+                          <SelectItem value="__none" disabled>
+                            No operatives found
+                          </SelectItem>
+                        )
+                      ) : (uwClients?.length ?? 0) > 0 ? (
+                        uwClients.map((c) => (
+                          <SelectItem key={c.id} value={c.id}>
+                            {c.name}
+                          </SelectItem>
+                        ))
+                      ) : (
+                        <SelectItem value="__none" disabled>
+                          No clients found
+                        </SelectItem>
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
+                {/* Note */}
+                <div>
+                  <Label className="text-sm font-medium">Reason / Note</Label>
+                  <Textarea
+                    placeholder="Add a short note explaining why this pairing is not workable"
+                    value={uwNote}
+                    onChange={(e) => setUwNote(e.target.value)}
+                    className="mt-1"
+                    rows={2}
+                  />
+                </div>
+
+                <div className="flex gap-2">
+                  <Button type="button" variant="outline" onClick={addUwItem} disabled={!uwId || isSelfSelected}>
+                    Add
+                  </Button>
+                </div>
+
+                {/* List */}
+                <div className="space-y-2">
+                  <Label className="text-sm font-medium">Cannot work with:</Label>
+                  <div className="flex flex-wrap gap-2">
+                    {uwItems.length === 0 && (
+                      <span className="text-xs text-muted-foreground">None selected</span>
+                    )}
+                    {uwItems.map((item, idx) => (
+                      <Badge key={`${item.type}-${item.id}-${idx}`} className="flex items-center gap-1 bg-white-100 text-blue-800 border border-blue-300">
+                        {item.type === "operative" ? "Operative" : "Client"}: {labelForUw(item)}
+                        {item.note && (
+                          <span className="ml-1 text-[24px] text-muted-foreground">— {item.note}</span>
+                        )}
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-4 w-4 p-0 hover:bg-transparent"
+                          onClick={() => removeUwItem(item.type, item.id)}
+                          title="Remove"
+                          aria-label="Remove restriction"
+                        >
+                          <Trash2></Trash2>
+                        </Button>
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+
       </Tabs>
     </div>
   )
 }
+
 
 
 

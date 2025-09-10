@@ -1,8 +1,7 @@
-"use client"
+﻿"use client"
 
 import type React from "react"
-
-import { useState, useEffect } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -21,16 +20,22 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Plus, Search, Edit, Trash2, Building2, MapPin, Calendar, Users, CheckCircle } from "lucide-react"
+import { Plus, Search, Edit, Trash2, Building2, MapPin, Calendar, Users, CheckCircle, AlertTriangle } from "lucide-react"
 import type { ConstructionSite, Operative, SiteAssignment, Client } from "@/lib/types"
 import { toast } from "@/components/ui/use-toast"
+import { ToastAction } from "@/components/ui/toast"
+
+type SiteActivityFilter = "all" | "active" | "inactive"
 
 export function SiteManagement() {
   const [sites, setSites] = useState<ConstructionSite[]>([])
   const [operatives, setOperatives] = useState<Operative[]>([])
   const [assignments, setAssignments] = useState<SiteAssignment[]>([])
   const [clients, setClients] = useState<Client[]>([])
+
   const [searchTerm, setSearchTerm] = useState("")
+  const [siteActivityFilter, setSiteActivityFilter] = useState<SiteActivityFilter>("all")
+
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [editingSite, setEditingSite] = useState<ConstructionSite | null>(null)
 
@@ -38,6 +43,7 @@ export function SiteManagement() {
   const [selectedOperatives, setSelectedOperatives] = useState<string[]>([])
   const [availabilityFilter, setAvailabilityFilter] = useState<"all" | "available" | "deployed">("all")
   const [complianceFilter, setComplianceFilter] = useState<"all" | "compliant" | "attention">("all")
+
   const [geoCache, setGeoCache] = useState<Record<string, { lat: number; lng: number }>>({})
   const [distanceMap, setDistanceMap] = useState<Record<string, number>>({})
   const OPENCAGE_KEY = process.env.NEXT_PUBLIC_OPENCAGE_API_KEY as string | undefined
@@ -52,24 +58,87 @@ export function SiteManagement() {
     requiredTrades: "",
     maxOperatives: "",
   })
+  // Determine current site client id (from form or editing context)
+  const currentClientId = useMemo(() => {
+    if (formData.clientId) {
+      const n = Number(formData.clientId)
+      return Number.isFinite(n) ? n : undefined
+    }
+    if (editingSite?.clientId != null) return Number(editingSite.clientId)
+    return undefined
+  }, [formData.clientId, editingSite])
 
+  // Build an index for quick operative lookup
+  const operativeById = useMemo(() => {
+    const map: Record<string, Operative> = {}
+    for (const op of operatives) map[op.id] = op
+    return map
+  }, [operatives])
+
+  // Compute incompatibility reasons between a candidate operative and current selections / client
+  const getIncompatibilityWarnings = (candidate: Operative) => {
+    const warnings: string[] = []
+
+    // Against client
+    if (currentClientId != null && Array.isArray(candidate.unableToWorkWith)) {
+      const clientBlocks = candidate.unableToWorkWith.filter(
+        (u: any) => (u.targetType === "CLIENT" || u.targetType === "client") && Number(u.targetClientId) === Number(currentClientId),
+      )
+      for (const blk of clientBlocks) {
+        const clientName = getClientName(String(currentClientId))
+        const note = blk && typeof blk.note === "string" && blk.note.length ? " Note: " + blk.note : ""
+        warnings.push((candidate.personalDetails?.fullName || candidate.id) + " is unable to work with client " + "." + note)
+      }
+    }
+
+    // Against other selected operatives (both directions)
+    for (const selectedId of selectedOperatives) {
+      if (selectedId === candidate.id) continue
+      const other = operativeById[selectedId]
+      if (!other) continue
+
+      // Candidate -> Other
+      const candBlocks = (candidate.unableToWorkWith || []).filter(
+        (u: any) => (u.targetType === "OPERATIVE" || u.targetType === "operative") && String(u.targetOperativeId) === String(other.id),
+      )
+      for (const blk of candBlocks) {
+        const note = blk && typeof blk.note === "string" && blk.note.length ? " Note: " + blk.note : ""
+        warnings.push((candidate.personalDetails?.fullName || candidate.id) + " is unable to work with " + (other.personalDetails?.fullName || other.id) + "." + note)
+      }
+
+      // Other -> Candidate
+      const otherBlocks = (other.unableToWorkWith || []).filter(
+        (u: any) => (u.targetType === "OPERATIVE" || u.targetType === "operative") && String(u.targetOperativeId) === String(candidate.id),
+      )
+      for (const blk of otherBlocks) {
+        const note = blk && typeof blk.note === "string" && blk.note.length ? " Note: " + blk.note : ""
+        warnings.push((other.personalDetails?.fullName || other.id) + " is unable to work with " + (candidate.personalDetails?.fullName || candidate.id) + "." + note)
+      }
+    }
+
+    return warnings
+  }
+
+
+  /* ---------------- Fetch data ---------------- */
   useEffect(() => {
     fetchOperatives()
     fetchAssignments()
     fetchSites()
     fetchClients()
   }, [])
+
   const fetchClients = async () => {
-  try {
-    const res = await fetch("/api/clients")
-    if (res.ok) {
-      const data = await res.json()
-      setClients(data)
+    try {
+      const res = await fetch("/api/clients")
+      if (res.ok) {
+        const data = await res.json()
+        setClients(data)
+      }
+    } catch (err) {
+      console.error("Failed to fetch clients:", err)
     }
-  } catch (err) {
-    console.error("Failed to fetch clients:", err)
   }
-}
 
   const fetchOperatives = async () => {
     try {
@@ -84,35 +153,64 @@ export function SiteManagement() {
   }
 
   const fetchAssignments = async () => {
-  try {
-    const res = await fetch("/api/assignments")
-    if (res.ok) {
-      const data = await res.json()
-      setAssignments(data)
+    try {
+      const res = await fetch("/api/assignments")
+      if (res.ok) {
+        const data = await res.json()
+        setAssignments(data)
+      }
+    } catch (err) {
+      console.error("Failed to fetch assignments:", err)
     }
-  } catch (err) {
-    console.error("Failed to fetch assignments:", err)
   }
-}
+
   const fetchSites = async () => {
-  try {
-    const res = await fetch("/api/sites")
-    if (res.ok) {
-      const data = await res.json()
-      // parse date strings to Date objects if your API returns strings
-      setSites(
-        data.map((s: any) => ({
-          ...s,
-          startDate: new Date(s.startDate),
-          endDate: new Date(s.endDate),
-          createdAt: new Date(s.createdAt),
-        })),
-      )
+    try {
+      const res = await fetch("/api/sites")
+      if (res.ok) {
+        const data = await res.json()
+        // normalize dates from API
+        setSites(
+          data.map((s: any) => ({
+            ...s,
+            startDate: new Date(s.startDate),
+            endDate: new Date(s.endDate),
+            createdAt: s.createdAt ? new Date(s.createdAt) : new Date(),
+          })),
+        )
+      }
+    } catch (err) {
+      console.error("Failed to fetch sites:", err)
     }
-  } catch (err) {
-    console.error("Failed to fetch sites:", err)
   }
-}
+
+  /* ---------------- Helpers ---------------- */
+  const isDateInRange = (date: Date, start: Date, end: Date) => {
+    const d = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+    const s = new Date(start.getFullYear(), start.getMonth(), start.getDate())
+    const e = new Date(end.getFullYear(), end.getMonth(), end.getDate())
+    return d >= s && d <= e
+  }
+
+  // Week helpers (Monday–Sunday)
+  const getCurrentWeekRange = () => {
+    const today = new Date()
+    const d0 = new Date(today.getFullYear(), today.getMonth(), today.getDate())
+    const day = d0.getDay() // 0=Sun..6=Sat
+    const diffToMonday = (day + 6) % 7 // 0 for Monday
+    const start = new Date(d0)
+    start.setDate(d0.getDate() - diffToMonday)
+    const end = new Date(start)
+    end.setDate(start.getDate() + 6)
+    return { start, end }
+  }
+
+  const isSiteActiveThisWeek = (site: ConstructionSite) => {
+    const { start: weekStart, end: weekEnd } = getCurrentWeekRange()
+    const s = new Date(site.startDate)
+    const e = new Date(site.endDate)
+    return s <= weekEnd && weekStart <= e
+  }
 
   const getAssignedOperatives = (siteId: string) => {
     const siteAssignments = assignments.filter((assignment) => assignment.siteId === siteId)
@@ -121,113 +219,78 @@ export function SiteManagement() {
       .filter(Boolean) as Operative[]
   }
 
-  const isOperativeDeployedNow = (operativeId: string) => {
-    const now = new Date()
+  const isOperativeDeployedThisWeek = (operativeId: string) => {
+    const { start: weekStart, end: weekEnd } = getCurrentWeekRange()
     return assignments.some((a: any) => {
-      const start = new Date(a.startDate)
-      const end = new Date(a.endDate)
-      return String(a.operativeId) === String(operativeId) && start <= now && end >= now
+      const aStart = new Date(a.startDate)
+      const aEnd = new Date(a.endDate)
+      return String(a.operativeId) === String(operativeId) && aStart <= weekEnd && weekStart <= aEnd
     })
   }
 
   const isOperativeDeployedForCurrentRange = (operativeId: string) => {
-    // Determine target range from form (if provided) or the editing site dates
     const start = formData.startDate ? new Date(formData.startDate) : editingSite?.startDate
     const end = formData.endDate ? new Date(formData.endDate) : editingSite?.endDate
     if (start && end) {
       return assignments.some((a: any) => {
         const aStart = new Date(a.startDate)
         const aEnd = new Date(a.endDate)
-        // Overlap check: aStart <= end && start <= aEnd
         return String(a.operativeId) === String(operativeId) && aStart <= end && start <= aEnd
       })
     }
-    // Fallback to now-based status when no dates are set yet
-    return isOperativeDeployedNow(operativeId)
+    return isOperativeDeployedThisWeek(operativeId)
   }
 
-  const handleOperativeAssignment = async () => {
-    if (!editingSite) return
-
-    try {
-      // Get current assignments for this site
-      const currentAssignments = assignments.filter((a) => a.siteId === editingSite.id)
-      const currentOperativeIds = currentAssignments.map((a) => a.operativeId)
-
-      // Find operatives to add and remove
-      const operativesToAdd = selectedOperatives.filter((id) => !currentOperativeIds.includes(id))
-      const operativesToRemove = currentOperativeIds.filter((id) => !selectedOperatives.includes(id))
-
-      // Add new assignments
-      for (const operativeId of operativesToAdd) {
-        const assignmentData = {
-          operativeId,
-          siteId: editingSite.id,
-          startDate: editingSite.startDate.toISOString().split("T")[0],
-          endDate: editingSite.endDate.toISOString().split("T")[0],
-          status: "scheduled" as const,
-        }
-
-        await fetch("/api/assignments", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(assignmentData),
-        })
-      }
-
-      // Remove assignments
-      for (const operativeId of operativesToRemove) {
-        const assignmentToRemove = currentAssignments.find((a) => a.operativeId === operativeId)
-        if (assignmentToRemove) {
-          await fetch(`/api/assignments?id=${assignmentToRemove.id}`, { method: "DELETE" })
-        }
-      }
-
-      // Refresh assignments
-      await fetchAssignments()
-    } catch (error) {
-      console.error("Failed to update operative assignments:", error)
-    }
-  }
-
-  const filteredSites = sites.filter(
-    (site) =>
-      site.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      site.address.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      site.projectType.toLowerCase().includes(searchTerm.toLowerCase()),
-  )
-
-  // Determine compliance status
   const getComplianceStatus = (operative: Operative) => {
     const list = operative.complianceCertificates ?? []
     if (list.length === 0) return "error" as const
-    const hasRisk = list.some((c: any) => c.status === "EXPIRING_SOON" || c.status === "EXPIRED" || c.status === "INVALID")
+    const hasRisk = list.some(
+      (c: any) => c.status === "EXPIRING_SOON" || c.status === "EXPIRED" || c.status === "INVALID",
+    )
     return (hasRisk ? "warning" : "success") as const
   }
 
-  const filteredOperatives = operatives.filter((operative) => {
+  /* ---------------- Filtering ---------------- */
+  const filteredSites = useMemo(() => {
+    const q = searchTerm.toLowerCase()
+    return sites.filter((site) => {
+      const textMatch =
+        site.name.toLowerCase().includes(q) ||
+        site.address.toLowerCase().includes(q) ||
+        site.projectType.toLowerCase().includes(q)
+      if (!textMatch) return false
+
+      if (siteActivityFilter === "all") return true
+      const active = isSiteActiveThisWeek(site)
+      return siteActivityFilter === "active" ? active : !active
+    })
+  }, [sites, searchTerm, siteActivityFilter])
+
+  const filteredOperatives = useMemo(() => {
     const q = operativeSearchTerm.toLowerCase()
-    const name = operative.personalDetails?.fullName?.toLowerCase() || ""
-    const trade = (operative.trade || "").toLowerCase()
-    const id = operative.id?.toLowerCase() || ""
-    const matchesText = name.includes(q) || trade.includes(q) || id.includes(q)
+    return operatives.filter((operative) => {
+      const name = operative.personalDetails?.fullName?.toLowerCase() || ""
+      const trade = (operative.trade || "").toLowerCase()
+      const id = operative.id?.toLowerCase() || ""
+      const matchesText = name.includes(q) || trade.includes(q) || id.includes(q)
 
-    const isDep = isOperativeDeployedForCurrentRange(operative.id)
-    const matchesAvail =
-      availabilityFilter === "all" ||
-      (availabilityFilter === "available" && !isDep) ||
-      (availabilityFilter === "deployed" && isDep)
+      const isDep = isOperativeDeployedForCurrentRange(operative.id)
+      const matchesAvail =
+        availabilityFilter === "all" ||
+        (availabilityFilter === "available" && !isDep) ||
+        (availabilityFilter === "deployed" && isDep)
 
-    const compliant = getComplianceStatus(operative) === "success"
-    const matchesComp =
-      complianceFilter === "all" ||
-      (complianceFilter === "compliant" && compliant) ||
-      (complianceFilter === "attention" && !compliant)
+      const compliant = getComplianceStatus(operative) === "success"
+      const matchesComp =
+        complianceFilter === "all" ||
+        (complianceFilter === "compliant" && compliant) ||
+        (complianceFilter === "attention" && !compliant)
 
-    return matchesText && matchesAvail && matchesComp
-  })
+      return matchesText && matchesAvail && matchesComp
+    })
+  }, [operatives, operativeSearchTerm, availabilityFilter, complianceFilter, assignments, formData, editingSite])
 
-  // Geocoding and distance helpers
+  /* ---------------- Distance helpers ---------------- */
   const geocode = async (address: string): Promise<{ lat: number; lng: number } | null> => {
     if (!address) return null
     if (geoCache[address]) return geoCache[address]
@@ -251,14 +314,13 @@ export function SiteManagement() {
 
   const haversine = (a: { lat: number; lng: number }, b: { lat: number; lng: number }) => {
     const toRad = (x: number) => (x * Math.PI) / 180
-    const R = 6371 // km
+    const R = 6371
     const dLat = toRad(b.lat - a.lat)
     const dLon = toRad(b.lng - a.lng)
     const lat1 = toRad(a.lat)
     const lat2 = toRad(b.lat)
     const h =
-      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-      Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) * Math.sin(dLon / 2)
+      Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2
     const c = 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h))
     return R * c
   }
@@ -284,65 +346,101 @@ export function SiteManagement() {
     return () => {
       cancelled = true
     }
-  }, [filteredOperatives, formData.address, editingSite])
+  }, [filteredOperatives, formData.address, editingSite]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Derived stats
+  /* ---------------- Derived stats ---------------- */
   const totalSites = sites.length
-  const fullyFulfilledCount = (() => {
+  const fullyFulfilledCount = useMemo(() => {
     return sites.reduce((acc, site) => {
       const assigned = assignments.filter((a) => a.siteId === site.id).length
       return acc + (site.maxOperatives > 0 && assigned >= site.maxOperatives ? 1 : 0)
     }, 0)
-  })()
+  }, [sites, assignments])
+
+  /* ---------------- Actions ---------------- */
+  const handleOperativeAssignment = async () => {
+    if (!editingSite) return
+    try {
+      const currentAssignments = assignments.filter((a) => a.siteId === editingSite.id)
+      const currentOperativeIds = currentAssignments.map((a) => a.operativeId)
+
+      const operativesToAdd = selectedOperatives.filter((id) => !currentOperativeIds.includes(id))
+      const operativesToRemove = currentOperativeIds.filter((id) => !selectedOperatives.includes(id))
+
+      for (const operativeId of operativesToAdd) {
+        const assignmentData = {
+          operativeId,
+          siteId: editingSite.id,
+          startDate: editingSite.startDate.toISOString().split("T")[0],
+          endDate: editingSite.endDate.toISOString().split("T")[0],
+          status: "scheduled" as const,
+        }
+        await fetch("/api/assignments", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(assignmentData),
+        })
+      }
+
+      for (const operativeId of operativesToRemove) {
+        const assignmentToRemove = currentAssignments.find((a) => a.operativeId === operativeId)
+        if (assignmentToRemove) {
+          await fetch(`/api/assignments?id=${assignmentToRemove.id}`, { method: "DELETE" })
+        }
+      }
+
+      await fetchAssignments()
+    } catch (error) {
+      console.error("Failed to update operative assignments:", error)
+    }
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
-  e.preventDefault()
+    e.preventDefault()
 
-  const siteData: ConstructionSite = {
-    id: editingSite?.id || undefined, // let the server create id
-    name: formData.name,
-    address: formData.address,
-    clientId: formData.clientId,
-    projectType: formData.projectType,
-    startDate: new Date(formData.startDate),
-    endDate: new Date(formData.endDate),
-    status: editingSite?.status || "planning",
-    requiredTrades: formData.requiredTrades.split(",").map((t) => t.trim()),
-    maxOperatives: Number(formData.maxOperatives),
-    createdAt: editingSite?.createdAt || new Date(),
-  }
+    const siteData: ConstructionSite = {
+      id: editingSite?.id || undefined,
+      name: formData.name,
+      address: formData.address,
+      clientId: formData.clientId,
+      projectType: formData.projectType,
+      startDate: new Date(formData.startDate),
+      endDate: new Date(formData.endDate),
+      status: editingSite?.status || "planning",
+      requiredTrades: formData.requiredTrades ? formData.requiredTrades.split(",").map((t) => t.trim()) : [],
+      maxOperatives: Number(formData.maxOperatives),
+      createdAt: editingSite?.createdAt || new Date(),
+    }
 
-  try {
-    if (editingSite) {
-      if (selectedOperatives.length > siteData.maxOperatives) {
-        toast({
-          title: "Selection exceeds maximum",
-          description: `Selected ${selectedOperatives.length} but max is ${siteData.maxOperatives}. Please deselect some operatives.`,
+    try {
+      if (editingSite) {
+        if (selectedOperatives.length > siteData.maxOperatives) {
+          toast({
+            title: "Selection exceeds maximum",
+            description: `Selected ${selectedOperatives.length} but max is ${siteData.maxOperatives}. Please deselect some operatives.`,
+          })
+          return
+        }
+        await fetch(`/api/sites/${editingSite.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(siteData),
         })
-        return
+        await handleOperativeAssignment()
+      } else {
+        await fetch("/api/sites", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(siteData),
+        })
       }
-    }
-    if (editingSite) {
-      await fetch(`/api/sites/${editingSite.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(siteData),
-      })
-      await handleOperativeAssignment()
-    } else {
-      await fetch("/api/sites", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(siteData),
-      })
-    }
 
-    await fetchSites() // refresh list
-    resetForm()
-  } catch (err) {
-    console.error("Failed to save site:", err)
+      await fetchSites()
+      resetForm()
+    } catch (err) {
+      console.error("Failed to save site:", err)
+    }
   }
-}
 
   const resetForm = () => {
     setFormData({
@@ -371,33 +469,27 @@ export function SiteManagement() {
       startDate: site.startDate.toISOString().split("T")[0],
       endDate: site.endDate.toISOString().split("T")[0],
       requiredTrades: site.requiredTrades.join(", "),
-      maxOperatives: site.maxOperatives.toString(),
+      maxOperatives: String(site.maxOperatives ?? ""),
     })
-    const assignedOperatives = getAssignedOperatives(site.id)
-    setSelectedOperatives(assignedOperatives.map((op) => op.id))
+    const assigned = getAssignedOperatives(site.id)
+    setSelectedOperatives(assigned.map((op) => op.id))
     setIsAddDialogOpen(true)
   }
 
   const handleDelete = async (id: string) => {
-  try {
-    await fetch(`/api/sites/${id}`, { method: "DELETE" })
-    await fetchSites()
-  } catch (err) {
-    console.error("Failed to delete site:", err)
+    try {
+      await fetch(`/api/sites/${id}`, { method: "DELETE" })
+      await fetchSites()
+    } catch (err) {
+      console.error("Failed to delete site:", err)
+    }
   }
-}
 
   const getFillBadge = (assignedCount: number, maxOperatives: number) => {
-    if (!maxOperatives || maxOperatives <= 0) {
-      return { label: "NOT FILLED", className: "bg-red-100 text-red-800" }
-    }
-    if (assignedCount >= maxOperatives) {
-      return { label: "FILLED", className: "bg-green-100 text-green-800" }
-    }
-    if (assignedCount > 0) {
-      return { label: "PARTIALLY FILLED", className: "bg-yellow-100 text-yellow-800" }
-    }
-    return { label: "not filled", className: "bg-red-100 text-red-800" }
+    if (!maxOperatives || maxOperatives <= 0) return { label: "NOT FILLED", className: "bg-red-100 text-red-800" }
+    if (assignedCount >= maxOperatives) return { label: "FILLED", className: "bg-green-100 text-green-800" }
+    if (assignedCount > 0) return { label: "PARTIALLY FILLED", className: "bg-yellow-100 text-yellow-800" }
+    return { label: "NOT FILLED", className: "bg-red-100 text-red-800" }
   }
 
   const getClientName = (clientId: string) => {
@@ -405,14 +497,10 @@ export function SiteManagement() {
     return client?.name || "Unknown Client"
   }
 
-  const formatDate = (date: Date) => {
-    return date.toLocaleDateString("en-US", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    })
-  }
+  const formatDate = (date: Date) =>
+    new Date(date).toLocaleDateString("en-GB", { year: "numeric", month: "short", day: "numeric" })
 
+  /* ---------------- UI ---------------- */
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -428,6 +516,7 @@ export function SiteManagement() {
               Add Site
             </Button>
           </DialogTrigger>
+
           <DialogContent className="sm:max-w-[600px] max-h-[80vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>{editingSite ? "Edit Site" : "Add New Construction Site"}</DialogTitle>
@@ -444,9 +533,9 @@ export function SiteManagement() {
                 <TabsTrigger value="operatives">Assign Operatives</TabsTrigger>
               </TabsList>
 
+              {/* DETAILS */}
               <TabsContent value="details" className="space-y-4">
                 <form onSubmit={handleSubmit} className="space-y-4">
-                  {/* ... existing form fields ... */}
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label htmlFor="name">Site Name</Label>
@@ -457,6 +546,7 @@ export function SiteManagement() {
                         required
                       />
                     </div>
+
                     <div className="space-y-2">
                       <Label htmlFor="clientId">Client</Label>
                       <Select
@@ -495,14 +585,18 @@ export function SiteManagement() {
                       disabled={!formData.clientId}
                     >
                       <SelectTrigger>
-                        <SelectValue placeholder={formData.clientId ? "Select job type" : "Select a client first"} />
+                        <SelectValue
+                          placeholder={formData.clientId ? "Select job type" : "Select a client first"}
+                        />
                       </SelectTrigger>
                       <SelectContent>
-                        {(clients.find((c) => String(c.id) === String(formData.clientId))?.jobTypes || []).map((jt) => (
-                          <SelectItem key={jt.id} value={jt.name}>
-                            {jt.name}
-                          </SelectItem>
-                        ))}
+                        {(clients.find((c) => String(c.id) === String(formData.clientId))?.jobTypes || []).map(
+                          (jt) => (
+                            <SelectItem key={jt.id} value={jt.name}>
+                              {jt.name}
+                            </SelectItem>
+                          ),
+                        )}
                       </SelectContent>
                     </Select>
                   </div>
@@ -532,18 +626,21 @@ export function SiteManagement() {
 
                   <div className="space-y-2">
                     <Label htmlFor="requiredTrade">Trade</Label>
-                      <Select value={formData.requiredTrades} onValueChange={(value) => setFormData({ ...formData, requiredTrades: value })}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select trade" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="electrician">Electrician</SelectItem>
-                          <SelectItem value="plumber">Plumber</SelectItem>
-                          <SelectItem value="carpenter">Carpenter</SelectItem>
-                          <SelectItem value="general-laborer">General Laborer</SelectItem>
-                          <SelectItem value="bricklayer">Bricklayer</SelectItem>
-                          <SelectItem value="roofer">Roofer</SelectItem>
-                        </SelectContent>
+                    <Select
+                      value={formData.requiredTrades}
+                      onValueChange={(value) => setFormData({ ...formData, requiredTrades: value })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select trade" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="electrician">Electrician</SelectItem>
+                        <SelectItem value="plumber">Plumber</SelectItem>
+                        <SelectItem value="carpenter">Carpenter</SelectItem>
+                        <SelectItem value="general-laborer">General Laborer</SelectItem>
+                        <SelectItem value="bricklayer">Bricklayer</SelectItem>
+                        <SelectItem value="roofer">Roofer</SelectItem>
+                      </SelectContent>
                     </Select>
                   </div>
 
@@ -560,25 +657,32 @@ export function SiteManagement() {
                 </form>
               </TabsContent>
 
+              {/* OPERATIVES */}
               <TabsContent value="operatives" className="space-y-4">
                 <div className="space-y-4">
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
                     <div className="space-y-1">
                       <Label htmlFor="avail">Availability</Label>
-                      <Select value={availabilityFilter} onValueChange={(v) => setAvailabilityFilter(v as any)}>
+                      <Select
+                        value={availabilityFilter}
+                        onValueChange={(v) => setAvailabilityFilter(v as any)}
+                      >
                         <SelectTrigger id="avail">
                           <SelectValue placeholder="All" />
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="all">All</SelectItem>
-                          <SelectItem value="available">Available</SelectItem>
-                          <SelectItem value="deployed">Deployed</SelectItem>
+                          <SelectItem value="available">Available this week</SelectItem>
+                          <SelectItem value="deployed">Deployed this week</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
                     <div className="space-y-1">
                       <Label htmlFor="comp">Compliance</Label>
-                      <Select value={complianceFilter} onValueChange={(v) => setComplianceFilter(v as any)}>
+                      <Select
+                        value={complianceFilter}
+                        onValueChange={(v) => setComplianceFilter(v as any)}
+                      >
                         <SelectTrigger id="comp">
                           <SelectValue placeholder="All" />
                         </SelectTrigger>
@@ -607,7 +711,9 @@ export function SiteManagement() {
                           disabled={
                             !selectedOperatives.includes(operative.id) &&
                             Number(formData.maxOperatives || (editingSite?.maxOperatives ?? 0)) > 0 &&
-                            selectedOperatives.length >= Number(formData.maxOperatives || (editingSite?.maxOperatives ?? 0))
+                            selectedOperatives.length >= Number(
+                              formData.maxOperatives || (editingSite?.maxOperatives ?? 0),
+                            )
                           }
                           onCheckedChange={(checked) => {
                             const max = Number(formData.maxOperatives || (editingSite?.maxOperatives ?? 0))
@@ -622,21 +728,75 @@ export function SiteManagement() {
                               if (isOperativeDeployedForCurrentRange(operative.id)) {
                                 const displayName = operative.personalDetails?.fullName || operative.id
                                 const ok = window.confirm(
-                                  `${displayName} is already assigned during this timeframe. Assign to multiple sites?`
+                                  `${displayName} is already assigned during this timeframe. Assign to multiple sites?`,
                                 )
                                 if (!ok) return
                               }
+                              // Check incompatibilities (client and operatives) and block with toast
+                              const warnings = getIncompatibilityWarnings(operative)
+                              if (warnings.length > 0) {
+                                const proceed = () => {
+                                  setSelectedOperatives((prev) =>
+                                    prev.includes(operative.id) ? prev : [...prev, operative.id]
+                                  )
+                                  toast({
+                                    title: "Override applied",
+                                    description: "Operative assigned despite incompatibility.",
+                                  })
+                                }
+
+                                const t = toast({
+                                  description: (
+                                    <div className="space-y-3">
+                                      {/* Title row with triangle + text */}
+                                      <div className="flex items-center gap-2 font-semibold text-foreground">
+                                        <AlertTriangle className="h-5 w-5 text-amber-600" />
+                                        <span>Operative Unable to Work</span>
+                                      </div>
+
+                                      {/* Main explanation */}
+                                      <p className="text-sm text-foreground">
+                                        This operative is unable to work with the client or someone already assigned to this site.
+                                      </p>
+
+                                      {warnings.length > 0 && (
+                                        <ul className="list-disc list-inside text-sm text-muted-foreground space-y-1">
+                                          {warnings.map((w, i) => (
+                                            <li key={i}>{w}</li>
+                                          ))}
+                                        </ul>
+                                      )}
+                                      {/* Footer with button bottom-right */}
+                                      <div className="flex justify-end">
+                                        <Button
+                                          onClick={() => {
+                                            proceed()
+                                            try {
+                                              toast.dismiss(t.id)
+                                            } catch {}
+                                          }}
+                                          size="sm"
+                                          className="rounded-lg"
+                                        >
+                                          Override &amp; Assign
+                                        </Button>
+                                      </div>
+                                    </div>
+                                  ),
+                                })
+                                return
+                              }
                               setSelectedOperatives([...selectedOperatives, operative.id])
                             } else {
-                              setSelectedOperatives(selectedOperatives.filter((id) => id !== operative.id))
+                              setSelectedOperatives(
+                                selectedOperatives.filter((id) => id !== operative.id),
+                              )
                             }
                           }}
                         />
                         <div className="flex-1">
                           <p className="font-medium">{operative.personalDetails?.fullName ?? operative.id}</p>
-                          <p className="text-sm text-muted-foreground">
-                            {operative.trade}
-                          </p>
+                          <p className="text-sm text-muted-foreground">{operative.trade}</p>
                         </div>
                         <div className="flex items-center gap-3">
                           {distanceMap[operative.id] && (
@@ -644,7 +804,11 @@ export function SiteManagement() {
                               {distanceMap[operative.id].toFixed(1)} km away
                             </span>
                           )}
-                          <Badge variant={isOperativeDeployedForCurrentRange(operative.id) ? "destructive" : "default"}>
+                          <Badge
+                            variant={
+                              isOperativeDeployedForCurrentRange(operative.id) ? "destructive" : "default"
+                            }
+                          >
                             {isOperativeDeployedForCurrentRange(operative.id) ? "Deployed" : "Available"}
                           </Badge>
                         </div>
@@ -653,7 +817,9 @@ export function SiteManagement() {
                   </div>
 
                   {filteredOperatives.length === 0 && (
-                    <p className="text-center text-muted-foreground py-4">No operatives found matching your search</p>
+                    <p className="text-center text-muted-foreground py-4">
+                      No operatives found matching your search
+                    </p>
                   )}
                 </div>
               </TabsContent>
@@ -700,50 +866,88 @@ export function SiteManagement() {
         </Card>
       </div>
 
-      {/* ... existing search input ... */}
-      <div className="flex items-center space-x-2">
-        <Search className="h-4 w-4 text-muted-foreground" />
-        <Input
-          placeholder="Search sites by name, address, or project type..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          className="max-w-sm"
-        />
+      {/* Toolbar: activity filter + search */}
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-muted-foreground">Show:</span>
+          <div className="inline-flex rounded-md border overflow-hidden">
+            <Button
+              variant={siteActivityFilter === "all" ? "default" : "ghost"}
+              size="sm"
+              className={siteActivityFilter === "all" ? "" : "bg-transparent"}
+              onClick={() => setSiteActivityFilter("all")}
+            >
+              All
+            </Button>
+            <Button
+              variant={siteActivityFilter === "active" ? "default" : "ghost"}
+              size="sm"
+              className={siteActivityFilter === "active" ? "" : "bg-transparent"}
+              onClick={() => setSiteActivityFilter("active")}
+            >
+              Active (this week)
+            </Button>
+            <Button
+              variant={siteActivityFilter === "inactive" ? "default" : "ghost"}
+              size="sm"
+              className={siteActivityFilter === "inactive" ? "" : "bg-transparent"}
+              onClick={() => setSiteActivityFilter("inactive")}
+            >
+              Not active this week
+            </Button>
+          </div>
+        </div>
+
+        <div className="flex items-center space-x-2">
+          <Search className="h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Search sites by name, address, or project type..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="max-w-sm"
+          />
+        </div>
       </div>
 
+      {/* Site cards */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         {filteredSites.map((site) => {
           const assignedOperatives = getAssignedOperatives(site.id)
-
           const fill = getFillBadge(assignedOperatives.length, site.maxOperatives)
+          const activeThisWeek = isSiteActiveThisWeek(site)
 
           return (
             <Card key={site.id} className="hover:shadow-md transition-shadow">
               <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
                     <Building2 className="h-5 w-5 text-primary" />
                     <CardTitle className="text-lg">{site.name}</CardTitle>
                   </div>
-                  <Badge className={fill.className}>{fill.label}</Badge>
+                  <div className="flex items-center gap-2">
+                    <Badge className={fill.className}>{fill.label}</Badge>
+                    <Badge variant={activeThisWeek ? "default" : "outline"}>
+                      {activeThisWeek ? "Active this week" : "Not active this week"}
+                    </Badge>
+                  </div>
                 </div>
                 <CardDescription className="font-medium text-primary">{site.projectType}</CardDescription>
               </CardHeader>
+
               <CardContent className="space-y-3">
-                {/* ... existing content ... */}
                 <div className="space-y-2">
-                  <div className="flex items-center space-x-2 text-sm text-muted-foreground">
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <MapPin className="h-4 w-4" />
                     <span>{site.address}</span>
                   </div>
-                  <div className="flex items-center space-x-2 text-sm text-muted-foreground">
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <Users className="h-4 w-4" />
                     <span>Client: {getClientName(site.clientId)}</span>
                   </div>
                 </div>
 
                 <div className="space-y-2">
-                  <div className="flex items-center space-x-2 text-sm">
+                  <div className="flex items-center gap-2 text-sm">
                     <Calendar className="h-4 w-4 text-muted-foreground" />
                     <span className="text-muted-foreground">
                       {formatDate(site.startDate)} - {formatDate(site.endDate)}
@@ -793,7 +997,7 @@ export function SiteManagement() {
                   </div>
                 </div>
 
-                <div className="flex space-x-2 pt-2">
+                <div className="flex gap-2 pt-2">
                   <Button variant="outline" size="sm" onClick={() => handleEdit(site)} className="flex-1">
                     <Edit className="h-3 w-3 mr-1" />
                     Edit
@@ -803,6 +1007,7 @@ export function SiteManagement() {
                     size="sm"
                     onClick={() => handleDelete(site.id)}
                     className="text-destructive hover:text-destructive"
+                    aria-label="Delete site"
                   >
                     <Trash2 className="h-3 w-3" />
                   </Button>
@@ -813,7 +1018,6 @@ export function SiteManagement() {
         })}
       </div>
 
-      {/* ... existing empty state ... */}
       {filteredSites.length === 0 && (
         <div className="text-center py-12">
           <Building2 className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
@@ -826,3 +1030,10 @@ export function SiteManagement() {
     </div>
   )
 }
+
+
+
+
+
+
+
