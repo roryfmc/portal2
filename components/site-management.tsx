@@ -372,7 +372,7 @@ export function SiteManagement() {
           siteId: editingSite.id,
           startDate: editingSite.startDate.toISOString().split("T")[0],
           endDate: editingSite.endDate.toISOString().split("T")[0],
-          status: "scheduled" as const,
+          status: "SCHEDULED" as const,
         }
         await fetch("/api/assignments", {
           method: "POST",
@@ -655,22 +655,36 @@ export function SiteManagement() {
                                 const persist = async () => {
                                     // prefer editingSite dates; fallback to site by id
                                     const siteCtx = editingSite?.id === siteId
-                                    ? editingSite
-                                    : sites.find((s) => String(s.id) === String(siteId))
-                                    const startDateISO =
-                                    (siteCtx?.startDate ?? new Date()).toISOString().split("T")[0]
-                                    const endDateISO =
-                                    (siteCtx?.endDate ?? new Date()).toISOString().split("T")[0]
+                                      ? editingSite
+                                      : sites.find((s) => String(s.id) === String(siteId))
+
+                                    // Ensure newly added operatives appear under "Assigned" (future schedule)
+                                    const today = new Date(); today.setHours(0,0,0,0)
+                                    let start = siteCtx?.startDate ? new Date(siteCtx.startDate) : new Date(today)
+                                    start.setHours(0,0,0,0)
+                                    if (start <= today) {
+                                      start = new Date(today)
+                                      start.setDate(today.getDate() + 1)
+                                      start.setHours(0,0,0,0)
+                                    }
+                                    let end = siteCtx?.endDate ? new Date(siteCtx.endDate) : new Date(start)
+                                    end.setHours(0,0,0,0)
+                                    if (end < start) {
+                                      end = new Date(start)
+                                    }
+
+                                    const startDateISO = start.toISOString().split("T")[0]
+                                    const endDateISO = end.toISOString().split("T")[0]
+
                                     const res = await fetch("/api/assignments", {
-                                    method: "POST",
-                                    headers: { "Content-Type": "application/json" },
-                                    body: JSON.stringify({
+                                      method: "POST",
+                                      headers: { "Content-Type": "application/json" },
+                                      body: JSON.stringify({
                                         operativeId: op.id,
                                         siteId,
                                         startDate: startDateISO,
                                         endDate: endDateISO,
-                                        status: "scheduled",
-                                    }),
+                                      }),
                                     })
                                     if (!res.ok) {
                                     toast({ title: "Could not assign", description: "Server rejected the assignment." })
@@ -946,7 +960,7 @@ export function SiteManagement() {
                             <TabsTrigger value="assigned">Assigned ({assignedOperatives.length})</TabsTrigger>
                             <TabsTrigger value="current">This Week ({assignedOperatives.filter((o) =>assignments.some((a) =>String(a.siteId) === String(site.id) &&
                             String(a.operativeId) === String(o.id) &&
-                            String(a.status).toUpperCase() === "ACTIVE"
+                            String(a.status).toUpperCase() === "DEPLOYED"
                                   )
                                  ).length
                                 })
@@ -954,157 +968,186 @@ export function SiteManagement() {
                             <TabsTrigger value="off-site">Off Site</TabsTrigger>
                           </TabsList>
                         {/* ASSIGNED OPERATIVES TAB */}         
+                          {/* ASSIGNED OPERATIVES TAB */}
                           <TabsContent value="assigned" className="space-y-2">
-                            <div className="flex justify-between items-center">
-                                <p className="text-sm text-slate-600">Operatives assigned for future work</p>
-                                <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => {
-                                    // Preload editingSite and current selections for this site
-                                    setEditingSite(site)
-                                    const assigned = getAssignedOperatives(site.id)
-                                    setSelectedOperatives(assigned.map((op) => op.id))
-                                    setShowAssignModal(site.id)
-                                }}
-                                className="text-orange-600 hover:text-orange-700"
-                                >
-                                <UserPlus className="w-4 h-4 mr-1" />
-                                Add
-                                </Button>
-                            </div>
+                            {(() => {
+                                // ACTIVE ids for this site
+                                const activeIds = new Set(
+                                assignments
+                                    .filter(
+                                    (a) =>
+                                        String(a.siteId) === String(site.id) &&
+                                        String(a.status).toUpperCase() === "ASSIGNED"
+                                    )
+                                    .map((a) => String(a.operativeId))
+                                )
+                                // Only non-ACTIVE (future) operatives
+                                const futureOps = assignedOperatives.filter(
+                                (o) => !activeIds.has(String(o.id))
+                                )
 
-                            {assignedOperatives.length > 0 ? (
-                                assignedOperatives.map((operative) => (
-                                <div
-                                    key={operative.id}
-                                    className="flex items-center justify-between bg-blue-50 p-3 rounded border-l-4 border-blue-400"
-                                >
-                                    <div>
-                                    <p className="font-medium text-sm">
-                                        {operative.personalDetails?.fullName || operative.id}
-                                    </p>
-                                    <p className="text-xs text-slate-600">{operative.trade}</p>
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                    <Badge variant="outline" className="text-xs">Assigned</Badge>
-                                    {/* Actions (inline, no extra helpers) */}
-                                    <div className="flex gap-1">
-                                        <Button
-                                        size="sm"
-                                        className="bg-green-600 hover:bg-green-700"
-                                        title="Mark as current"
-                                        onClick={async () => {
-                                            try {
-                                            const target = assignments.find(
-                                                (a) =>
-                                                String(a.siteId) === String(site.id) &&
-                                                String(a.operativeId) === String(operative.id)
-                                            )
-                                            if (!target) {
-                                                toast({
-                                                title: "No assignment found",
-                                                description:
-                                                    "Could not locate this operative's assignment for the site.",
-                                                })
-                                                return
-                                            }
-                                            const res = await fetch(`/api/assignments?id=${target.id}`, {
-                                                method: "PUT",
-                                                headers: { "Content-Type": "application/json" },
-                                                body: JSON.stringify({ ...target, status: "active" }),
-                                            })
-                                            if (!res.ok) throw new Error("Failed to update assignment")
-                                            await fetchAssignments()
-                                            toast({
-                                                title: "Assignment updated",
-                                                description: "Marked as current.",
-                                            })
-                                            } catch (e) {
-                                            console.error(e)
-                                            toast({
-                                                title: "Update failed",
-                                                description: "Could not update status.",
-                                            })
-                                            }
-                                        }}
-                                        >
-                                        <ArrowRight className="w-4 h-4" />
-                                        </Button>
-                                        <Button
+                                return (
+                                <>
+                                    <div className="flex justify-between items-center">
+                                    <p className="text-sm text-slate-600">Operatives assigned for future work</p>
+                                    <Button
                                         size="sm"
                                         variant="outline"
-                                        className="text-red-600 hover:text-red-700"
-                                        title="Remove from site"
-                                        onClick={async () => {
-                                            try {
-                                            const target = assignments.find(
-                                                (a) =>
-                                                String(a.siteId) === String(site.id) &&
-                                                String(a.operativeId) === String(operative.id)
-                                            )
-                                            if (!target) {
-                                                toast({
-                                                title: "No assignment found",
-                                                description: "Nothing to remove for this operative at this site.",
-                                                })
-                                                return
-                                            }
-                                            const res = await fetch(`/api/assignments?id=${target.id}`, {
-                                                method: "DELETE",
-                                            })
-                                            if (!res.ok) throw new Error("Failed to delete assignment")
-                                            await fetchAssignments()
-                                            toast({
-                                                title: "Operative removed",
-                                                description: "Unassigned from the site.",
-                                            })
-
-                                            if (editingSite?.id === site.id) {
-                                                setSelectedOperatives((prev) =>
-                                                prev.filter((id) => id !== operative.id)
-                                                )
-                                            }
-                                            } catch (e) {
-                                            console.error(e)
-                                            toast({
-                                                title: "Removal failed",
-                                                description: "Could not remove operative.",
-                                            })
-                                            }
+                                        onClick={() => {
+                                        setEditingSite(site)
+                                        const assigned = getAssignedOperatives(site.id)
+                                        setSelectedOperatives(assigned.map((op) => op.id))
+                                        setShowAssignModal(site.id)
                                         }}
+                                        className="text-orange-600 hover:text-orange-700"
+                                    >
+                                        <UserPlus className="w-4 h-4 mr-1" />
+                                        Add
+                                    </Button>
+                                    </div>
+
+                                    {futureOps.length > 0 ? (
+                                    futureOps.map((operative) => (
+                                        <div
+                                        key={operative.id}
+                                        className="flex items-center justify-between bg-blue-50 p-3 rounded border-l-4 border-blue-400"
                                         >
-                                        <UserMinus className="w-4 h-4" />
-                                        </Button>
+                                        <div>
+                                            <p className="font-medium text-sm">
+                                            {operative.personalDetails?.fullName || operative.id}
+                                            </p>
+                                            <p className="text-xs text-slate-600">{operative.trade}</p>
+                                        </div>
+
+                                        <div className="flex items-center gap-2">
+                                            <Badge variant="outline" className="text-xs">Assigned</Badge>
+
+                                            {/* Actions */}
+                                            <div className="flex gap-1">
+                                            <Button
+                                                size="sm"
+                                                className="bg-green-600 hover:bg-green-700"
+                                                title="Mark as current"
+                                                onClick={async () => {
+                                                try {
+                                                    const target = assignments.find(
+                                                    (a) =>
+                                                        String(a.siteId) === String(site.id) &&
+                                                        String(a.operativeId) === String(operative.id)
+                                                    )
+                                                    if (!target) {
+                                                    toast({
+                                                        title: "No assignment found",
+                                                        description:
+                                                        "Could not locate this operative's assignment for the site.",
+                                                    })
+                                                    return
+                                                    }
+                                                    const res = await fetch(`/api/assignments?id=${target.id}`, {
+                                                    method: "PUT",
+                                                    headers: { "Content-Type": "application/json" },
+                                                    body: JSON.stringify({ ...target, status: "DEPLOYED" }), // make ACTIVE
+                                                    })
+                                                    if (!res.ok) throw new Error("Failed to update assignment")
+                                                    await fetchAssignments()
+                                                    toast({ title: "Assignment updated", description: "Marked as current." })
+                                                } catch (e) {
+                                                    console.error(e)
+                                                    toast({ title: "Update failed", description: "Could not update status." })
+                                                }
+                                                }}
+                                            >
+                                                <ArrowRight className="w-4 h-4" />
+                                            </Button>
+
+                                            <Button
+                                                size="sm"
+                                                variant="outline"
+                                                className="text-red-600 hover:text-red-700"
+                                                title="Remove from site"
+                                                onClick={async () => {
+                                                try {
+                                                    const target = assignments.find(
+                                                    (a) =>
+                                                        String(a.siteId) === String(site.id) &&
+                                                        String(a.operativeId) === String(operative.id)
+                                                    )
+                                                    if (!target) {
+                                                    toast({
+                                                        title: "No assignment found",
+                                                        description: "Nothing to remove for this operative at this site.",
+                                                    })
+                                                    return
+                                                    }
+                                                    const res = await fetch(`/api/assignments?id=${target.id}`, {
+                                                    method: "DELETE",
+                                                    })
+                                                    if (!res.ok) throw new Error("Failed to delete assignment")
+                                                    await fetchAssignments()
+                                                    toast({
+                                                    title: "Operative removed",
+                                                    description: "Unassigned from the site.",
+                                                    })
+                                                    if (editingSite?.id === site.id) {
+                                                    setSelectedOperatives((prev) =>
+                                                        prev.filter((id) => id !== operative.id)
+                                                    )
+                                                    }
+                                                } catch (e) {
+                                                    console.error(e)
+                                                    toast({ title: "Removal failed", description: "Could not remove operative." })
+                                                }
+                                                }}
+                                            >
+                                                <UserMinus className="w-4 h-4" />
+                                            </Button>
+                                            </div>
+                                        </div>
+                                        </div>
+                                    ))
+                                    ) : (
+                                    <p className="text-sm text-slate-600 py-4 text-center">No operatives assigned yet</p>
+                                    )}
+                                </>
+                                )
+                            })()}
+                          </TabsContent>
+                        {/* CURRENT WEEK OPERATIVES TAB */} 
+                          {/* CURRENT WEEK OPERATIVES TAB */}
+                          <TabsContent value="current" className="space-y-2">
+                            {(() => {
+                                const activeIds = new Set(
+                                assignments
+                                    .filter(
+                                    (a) =>
+                                        String(a.siteId) === String(site.id) &&
+                                        String(a.status).toUpperCase() === "DEPLOYED"
+                                    )
+                                    .map((a) => String(a.operativeId))
+                                )
+                                const activeOps = assignedOperatives.filter((o) => activeIds.has(String(o.id)))
+
+                                return activeOps.length > 0 ? (
+                                activeOps.map((operative) => (
+                                    <div
+                                    key={operative.id}
+                                    className="bg-green-50 p-4 rounded border-l-4 border-green-400 flex items-center justify-between"
+                                    >
+                                    <div>
+                                        <p className="font-medium text-sm">
+                                        {operative.personalDetails?.fullName || operative.id}
+                                        </p>
+                                        <p className="text-xs text-slate-600">{operative.trade}</p>
+                                        <Badge variant="secondary" className="text-xs mt-1">Currently Active</Badge>
                                     </div>
                                     </div>
-                                </div>
                                 ))
-                            ) : (
-                                <p className="text-sm text-slate-600 py-4 text-center">
-                                No operatives assigned yet
-                                </p>
-                            )}
+                                ) : (
+                                <p className="text-sm text-slate-600 py-4 text-center">No operatives currently on site</p>
+                                )
+                            })()}
                           </TabsContent>
 
-                        {/* CURRENT WEEK OPERATIVES TAB */} 
-                          <TabsContent value="current" className="space-y-2">
-                            {assignedOperatives.filter((o) => isOperativeDeployedThisWeek(o.id)).length > 0 ? (
-                              assignedOperatives
-                                .filter((o) => isOperativeDeployedThisWeek(o.id))
-                                .map((operative) => (
-                                  <div key={operative.id} className="bg-green-50 p-4 rounded border-l-4 border-green-400 flex items-center justify-between">
-                                    <div>
-                                      <p className="font-medium text-sm">{operative.personalDetails?.fullName || operative.id}</p>
-                                      <p className="text-xs text-slate-600">{operative.trade}</p>
-                                      <Badge variant="secondary" className="text-xs mt-1">Currently Active</Badge>
-                                    </div>
-                                  </div>
-                                ))
-                            ) : (
-                              <p className="text-sm text-slate-600 py-4 text-center">No operatives currently on site</p>
-                            )}
-                          </TabsContent>
                         {/* MOVED OFF SITE OPERATIVES TAB */} 
                           <TabsContent value="off-site" className="space-y-2">
                             <p className="text-sm text-slate-600">Use your date range to determine off-site operatives via assignments.</p>

@@ -187,7 +187,7 @@ model SiteAssignment {
   dailyRate   Decimal          @db.Decimal(10, 2)
   notes       String?
   createdAt   DateTime         @default(now())
-  status      AssignmentStatus @default(SCHEDULED)
+  status      AssignmentStatus @default(ASSIGNED)
   operative   Operative        @relation(fields: [operativeId], references: [id], onDelete: Cascade)
   site        ConstructionSite @relation(fields: [siteId], references: [id], onDelete: Cascade)
 
@@ -261,8 +261,7 @@ enum TimeOffStatus {
 }
 
 enum AssignmentStatus {
-  SCHEDULED
-  ACTIVE
-  COMPLETED
-  CANCELLED
+  ASSIGNED
+  DEPLOYED
+  OFFSITE
 }
