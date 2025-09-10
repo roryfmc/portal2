@@ -203,12 +203,20 @@ model SiteOperative {
   operativeId String
   startDate   DateTime
   endDate     DateTime
+  status      SiteOperativeStatus @default(ASSIGNED)
   operative   Operative        @relation(fields: [operativeId], references: [id], onDelete: Cascade)
   site        ConstructionSite @relation(fields: [siteId], references: [id], onDelete: Cascade)
 
   @@unique([siteId, operativeId, startDate])
   @@index([siteId])
   @@index([operativeId])
+}
+
+enum SiteOperativeStatus {
+  AVAILABLE
+  ASSIGNED
+  DEPLOYED
+  OFFSITE
 }
 
 model ClientJobType {

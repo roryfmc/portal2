@@ -1,16 +1,16 @@
 import { NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 
-// Helper to compute an assignment-like status from SiteOperative dates
-function computeStatus(row: { startDate: Date | string; endDate: Date | string }) {
+// Fallback status computation for legacy rows without status column
+function computeTemporalStatus(row: { startDate: Date | string; endDate: Date | string }) {
   const now = new Date(); now.setHours(0,0,0,0)
   const start = new Date(row.startDate)
   const end = new Date(row.endDate)
   if (!isNaN(start.getTime()) && !isNaN(end.getTime())) {
-    if (start <= now && now <= end) return "ACTIVE"
-    if (end < now) return "COMPLETED"
+    if (start <= now && now <= end) return "DEPLOYED"
+    if (end < now) return "OFFSITE"
   }
-  return "SCHEDULED"
+  return "ASSIGNED"
 }
 
 export async function GET() {
@@ -19,7 +19,7 @@ export async function GET() {
       include: { operative: true, site: true },
       orderBy: { id: "desc" },
     })
-    const withStatus = rows.map((r) => ({ ...r, status: computeStatus(r) }))
+    const withStatus = rows.map((r: any) => ({ ...r, status: r.status || computeTemporalStatus(r) }))
     return NextResponse.json(withStatus)
   } catch (err) {
     console.error("GET /assignments failed:", err)
@@ -45,11 +45,12 @@ export async function POST(req: Request) {
         siteId: String(siteId),
         startDate: new Date(startDate),
         endDate: new Date(endDate),
+        status: "ASSIGNED" as any,
       },
       include: { operative: true, site: true },
     })
 
-    return NextResponse.json({ ...created, status: computeStatus(created) })
+    return NextResponse.json({ ...created, status: created.status || computeTemporalStatus(created) })
   } catch (err) {
     console.error("POST /assignments failed:", err)
     return NextResponse.json({ error: "Failed to create assignment" }, { status: 500 })
@@ -65,26 +66,13 @@ export async function PUT(req: Request) {
     const body = await req.json().catch(() => ({}))
     const { startDate, endDate, status } = body || {}
 
-    // Build an update payload for SiteOperative (no native status column)
     const data: any = {}
     if (startDate) data.startDate = new Date(startDate)
     if (endDate) data.endDate = new Date(endDate)
-
-    if (!startDate && !endDate && typeof status === "string") {
+    if (typeof status === "string") {
       const desired = String(status).toUpperCase()
-      if (desired === "ACTIVE") {
-        // Ensure the assignment covers today by pulling startDate to today if it's in the future
-        const existing = await prisma.siteOperative.findUnique({ where: { id: Number(id) } })
-        if (!existing) return NextResponse.json({ error: "Assignment not found" }, { status: 404 })
-        const now = new Date(); now.setHours(0,0,0,0)
-        const currentStart = new Date(existing.startDate)
-        const currentEnd = new Date(existing.endDate)
-        // If start is after now, bring it forward to today
-        data.startDate = currentStart > now ? now : currentStart
-        // If end is before start (or before now), push to at least today
-        if (currentEnd < data.startDate) {
-          data.endDate = now
-        }
+      if (["AVAILABLE", "ASSIGNED", "DEPLOYED", "OFFSITE"].includes(desired)) {
+        data.status = desired as any
       }
     }
 
@@ -97,7 +85,7 @@ export async function PUT(req: Request) {
       data,
       include: { operative: true, site: true },
     })
-    return NextResponse.json({ ...updated, status: computeStatus(updated) })
+    return NextResponse.json({ ...updated, status: updated.status || computeTemporalStatus(updated) })
   } catch (err) {
     console.error("PUT /assignments failed:", err)
     return NextResponse.json({ error: "Failed to update assignment" }, { status: 500 })

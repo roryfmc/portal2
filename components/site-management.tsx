@@ -31,7 +31,7 @@ import {
   AlertTriangle,
   ArrowRight,
 } from "lucide-react"
-import type { ConstructionSite, Operative, SiteAssignment, Client } from "@/lib/types"
+import type { ConstructionSite, Operative, SiteOperative, Client } from "@/lib/types"
 import { toast } from "@/components/ui/use-toast"
 import { Navigation } from "@/components/navigation"
 
@@ -45,7 +45,7 @@ export function SiteManagement() {
   // data
   const [sites, setSites] = useState<ConstructionSite[]>([])
   const [operatives, setOperatives] = useState<Operative[]>([])
-  const [assignments, setAssignments] = useState<SiteAssignment[]>([])
+  const [assignments, setAssignments] = useState<SiteOperative[]>([])
   const [clients, setClients] = useState<Client[]>([])
 
   // ui state
@@ -971,17 +971,17 @@ export function SiteManagement() {
                           {/* ASSIGNED OPERATIVES TAB */}
                           <TabsContent value="assigned" className="space-y-2">
                             {(() => {
-                                // ACTIVE ids for this site
+                                // DEPLOYED ids for this site
                                 const activeIds = new Set(
                                 assignments
                                     .filter(
                                     (a) =>
                                         String(a.siteId) === String(site.id) &&
-                                        String(a.status).toUpperCase() === "ASSIGNED"
+                                        String(a.status).toUpperCase() === "DEPLOYED"
                                     )
                                     .map((a) => String(a.operativeId))
                                 )
-                                // Only non-ACTIVE (future) operatives
+                                // Only non-deployed (future) operatives
                                 const futureOps = assignedOperatives.filter(
                                 (o) => !activeIds.has(String(o.id))
                                 )

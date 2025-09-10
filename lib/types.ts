@@ -124,6 +124,7 @@ export type SiteOperative = {
   operativeId: string
   startDate: string
   endDate: string
+  status?: "AVAILABLE" | "ASSIGNED" | "DEPLOYED" | "OFFSITE"
   operative: {
     id: string
     name: string
