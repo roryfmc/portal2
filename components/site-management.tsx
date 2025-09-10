@@ -570,6 +570,73 @@ export function SiteManagement() {
     setSelectedOperatives((prev) => (prev.includes(operativeId) ? prev : [...prev, operativeId]))
     }
 
+    // WEEK DATES FOR TIMESHEET MANAGEMENT
+// --- Attendance helpers & week scaffold ---
+    const [attendanceMap, setAttendanceMap] = useState<Record<string, boolean>>({})
+
+    // local-safe YYYY-MM-DD (no UTC shift)
+    const toLocalISO = (d: Date) => {
+    const y = d.getFullYear()
+    const m = String(d.getMonth() + 1).padStart(2, "0")
+    const day = String(d.getDate()).padStart(2, "0")
+    return `${y}-${m}-${day}`
+    }
+    const parseLocalISO = (s: string) => {
+    const [y, m, d] = s.split("-").map(Number)
+    const dt = new Date(y, m - 1, d)
+    dt.setHours(0, 0, 0, 0)
+    return dt
+    }
+
+    // Monday → Sunday for the current week (local)
+    const getCurrentWeekDates = () => {
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    const diffToMonday = (today.getDay() + 6) % 7 // Mon=0,...,Sun=6
+    const monday = new Date(today)
+    monday.setDate(today.getDate() - diffToMonday)
+    const days: string[] = []
+    for (let i = 0; i < 7; i++) {
+        const d = new Date(monday)
+        d.setDate(monday.getDate() + i)
+        days.push(toLocalISO(d))
+    }
+    return days
+    }
+
+    const weekDates = useMemo(() => getCurrentWeekDates(), [])
+    const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+    // read attendance for a day
+    const getDailyAttendance = (siteId: string, operativeId: string, dateISO: string): boolean => {
+    const key = `${siteId}::${operativeId}::${dateISO}`
+    return Boolean(attendanceMap[key])
+    }
+
+    // toggle/set attendance (in-memory; add your API call if you want to persist)
+    const updateDailyAttendance = async (
+    siteId: string,
+    operativeId: string,
+    dateISO: string,
+    present: boolean
+    ) => {
+    const key = `${siteId}::${operativeId}::${dateISO}`
+    setAttendanceMap((prev) => ({ ...prev, [key]: present }))
+
+    // OPTIONAL: persist
+    // await fetch("/api/attendance", {
+    //   method: "POST",
+    //   headers: { "Content-Type": "application/json" },
+    //   body: JSON.stringify({ siteId, operativeId, date: dateISO, present }),
+    // })
+    }
+
+    // helper for disabling future days in your buttons
+    const todayISO = toLocalISO(new Date())
+    const isFutureDate = (dateISO: string) => parseLocalISO(dateISO) > parseLocalISO(todayISO)
+
+
+
   // ---- UI ----
   return (
     <div className="space-y-6">
@@ -1115,8 +1182,11 @@ export function SiteManagement() {
                         {/* CURRENT WEEK OPERATIVES TAB */} 
                           {/* CURRENT WEEK OPERATIVES TAB */}
                           <TabsContent value="current" className="space-y-2">
+                            <p className="text-sm text-slate-600">Operatives currently working on site</p>
+
                             {(() => {
-                                const activeIds = new Set(
+                                // DEPLOYED assignments for this site
+                                const deployedIds = new Set(
                                 assignments
                                     .filter(
                                     (a) =>
@@ -1125,28 +1195,179 @@ export function SiteManagement() {
                                     )
                                     .map((a) => String(a.operativeId))
                                 )
-                                const activeOps = assignedOperatives.filter((o) => activeIds.has(String(o.id)))
+
+                                const activeOps = assignedOperatives.filter((o) =>
+                                deployedIds.has(String(o.id))
+                                )
 
                                 return activeOps.length > 0 ? (
                                 activeOps.map((operative) => (
                                     <div
                                     key={operative.id}
-                                    className="bg-green-50 p-4 rounded border-l-4 border-green-400 flex items-center justify-between"
+                                    className="bg-green-50 p-4 rounded border-l-4 border-green-400 space-y-3"
                                     >
-                                    <div>
+                                    <div className="flex items-center justify-between">
+                                        <div>
                                         <p className="font-medium text-sm">
-                                        {operative.personalDetails?.fullName || operative.id}
+                                            {operative.personalDetails?.fullName || operative.id}
                                         </p>
                                         <p className="text-xs text-slate-600">{operative.trade}</p>
-                                        <Badge variant="secondary" className="text-xs mt-1">Currently Active</Badge>
+                                        <Badge variant="secondary" className="text-xs mt-1">
+                                            Currently Active
+                                        </Badge>
+                                        </div>
+
+                                        <div className="flex gap-1">
+                                        {/* Complete -> set assignment to COMPLETED */}
+                                        <Button
+                                            size="sm"
+                                            className="bg-blue-600 hover:bg-blue-700"
+                                            onClick={async () => {
+                                            try {
+                                                const target = assignments.find(
+                                                (a) =>
+                                                    String(a.siteId) === String(site.id) &&
+                                                    String(a.operativeId) === String(operative.id)
+                                                )
+                                                if (!target) {
+                                                toast({
+                                                    title: "No assignment found",
+                                                    description:
+                                                    "Could not locate this operative's assignment for the site.",
+                                                })
+                                                return
+                                                }
+                                                const res = await fetch(`/api/assignments?id=${target.id}`, {
+                                                method: "PUT",
+                                                headers: { "Content-Type": "application/json" },
+                                                body: JSON.stringify({ ...target, status: "COMPLETED" }),
+                                                })
+                                                if (!res.ok) throw new Error("Failed to update assignment")
+                                                await fetchAssignments()
+                                                toast({
+                                                title: "Assignment completed",
+                                                description: "Marked as completed.",
+                                                })
+                                            } catch (e) {
+                                                console.error(e)
+                                                toast({
+                                                title: "Update failed",
+                                                description: "Could not complete assignment.",
+                                                })
+                                            }
+                                            }}
+                                        >
+                                            Complete
+                                        </Button>
+
+                                        {/* Remove from site -> DELETE assignment */}
+                                        <Button
+                                            size="sm"
+                                            variant="outline"
+                                            className="text-red-600 hover:text-red-700"
+                                            onClick={async () => {
+                                            try {
+                                                const target = assignments.find(
+                                                (a) =>
+                                                    String(a.siteId) === String(site.id) &&
+                                                    String(a.operativeId) === String(operative.id)
+                                                )
+                                                if (!target) {
+                                                toast({
+                                                    title: "No assignment found",
+                                                    description:
+                                                    "Nothing to remove for this operative at this site.",
+                                                })
+                                                return
+                                                }
+                                                const res = await fetch(`/api/assignments?id=${target.id}`, {
+                                                method: "DELETE",
+                                                })
+                                                if (!res.ok) throw new Error("Failed to delete assignment")
+                                                await fetchAssignments()
+                                                toast({
+                                                title: "Operative removed",
+                                                description: "Unassigned from the site.",
+                                                })
+                                                if (editingSite?.id === site.id) {
+                                                setSelectedOperatives((prev) =>
+                                                    prev.filter((id) => id !== operative.id)
+                                                )
+                                                }
+                                            } catch (e) {
+                                                console.error(e)
+                                                toast({
+                                                title: "Removal failed",
+                                                description: "Could not remove operative.",
+                                                })
+                                            }
+                                            }}
+                                        >
+                                            Remove
+                                        </Button>
+                                        </div>
+                                    </div>
+
+                                    {/* Attendance (unchanged UI; relies on your existing helpers) */}
+                                    <div className="border-t pt-3">
+                                        <p className="text-xs font-medium text-slate-700 mb-2">
+                                        Daily Attendance This Week:
+                                        </p>
+                                        <div className="grid grid-cols-7 gap-1">
+                                        {weekDates.map((date, index) => {
+                                            const isPresent = getDailyAttendance(site.id, operative.id, date)
+                                            const todayISO = new Date().toISOString().split("T")[0]
+                                            const isToday = date === todayISO
+                                            const isPastDate = new Date(date) < new Date(todayISO)
+
+                                            return (
+                                            <div key={date} className="text-center">
+                                                <p className="text-xs text-slate-600 mb-1">{dayNames[index]}</p>
+                                                <p className="text-xs text-slate-500 mb-1">
+                                                {new Date(date).getDate()}
+                                                </p>
+                                                <Button
+                                                size="sm"
+                                                variant={isPresent ? "default" : "outline"}
+                                                className={`w-8 h-8 p-0 text-xs ${
+                                                    isPresent
+                                                    ? "bg-green-600 hover:bg-green-700"
+                                                    : "hover:bg-slate-100"
+                                                } ${isToday ? "ring-2 ring-blue-400" : ""}`}
+                                                onClick={() =>
+                                                    updateDailyAttendance(site.id, operative.id, date, !isPresent)
+                                                }
+                                                disabled={!isPastDate && !isToday}
+                                                >
+                                                {isPresent ? "✓" : "○"}
+                                                </Button>
+                                            </div>
+                                            )
+                                        })}
+                                        </div>
+                                        <div className="flex justify-between items-center mt-2 text-xs text-slate-600">
+                                        <span>
+                                            Present:{" "}
+                                            {
+                                            weekDates.filter((d) =>
+                                                getDailyAttendance(site.id, operative.id, d)
+                                            ).length
+                                            }
+                                            /7 days
+                                        </span>
+                                        <span className="text-blue-600">Today highlighted</span>
+                                        </div>
                                     </div>
                                     </div>
                                 ))
                                 ) : (
-                                <p className="text-sm text-slate-600 py-4 text-center">No operatives currently on site</p>
+                                <p className="text-sm text-slate-600 py-4 text-center">
+                                    No operatives currently on site
+                                </p>
                                 )
                             })()}
                           </TabsContent>
+
 
                         {/* MOVED OFF SITE OPERATIVES TAB */} 
                           <TabsContent value="off-site" className="space-y-2">
