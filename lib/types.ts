@@ -189,3 +189,19 @@ export interface SimpleOperative {
   status: "available" | "deployed" | "on-leave" | "unavailable"
   createdAt: Date
 }
+
+export type TimeEntryStatus = "pending" | "approved" | "rejected"
+
+export interface TimeEntry {
+  id: string
+  operativeId: string
+  siteId: string // same as jobId in some UIs; here we align with your Site model
+  date: string   // YYYY-MM-DD
+  startTime: string // "HH:mm"
+  endTime: string   // "HH:mm"
+  breakDuration: number // minutes
+  totalHours: number
+  hourlyRate: number
+  status: TimeEntryStatus
+  notes?: string
+}

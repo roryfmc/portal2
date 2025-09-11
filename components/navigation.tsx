@@ -1,6 +1,6 @@
 "use client"
 import { Button } from "@/components/ui/button"
-import { Calendar, Users, Building2, BarChart3, Mail, HardHat } from "lucide-react"
+import { Calendar, Users, Building2, BarChart3, Calculator, HardHat } from "lucide-react"
 
 interface NavigationProps {
   activeTab: string
@@ -14,6 +14,7 @@ export function Navigation({ activeTab, onTabChange }: NavigationProps) {
     { id: "sites", label: "Sites", icon: Building2 },
     { id: "clients", label: "Clients", icon: Users },
     { id: "dashboard", label: "Dashboard", icon: BarChart3 },
+    { id: "timesheet", label: "Timesheet", icon: Calculator},
   ]
 
   return (

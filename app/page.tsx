@@ -11,6 +11,7 @@ import { SiteManagement } from "@/components/site-management"
 import { ClientManagement } from "@/components/client-management"
 import { WorkforceDashboard } from "@/components/workforce-dashboard"
 import { ComplianceManagement } from "@/components/compliance-management"
+import Timesheet from "@/components/timesheets"
 
 export default function HomePage() {
   const [activeTab, setActiveTab] = useState("calendar")
@@ -132,6 +133,8 @@ export default function HomePage() {
         return <ClientManagement />
       case "dashboard":
         return <WorkforceDashboard />
+      case "timesheet":
+        return <Timesheet />
       default:
         return <CalendarView />
     }

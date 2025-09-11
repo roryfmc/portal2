@@ -22,6 +22,7 @@ model Operative {
   unableToWorkWith       UnableToWorkWith[]      @relation("UnworkableSourceOperative")
   unworkableAsTarget     UnableToWorkWith[]      @relation("UnworkableTargetOperative")
   workSites              WorkSite[]
+  TimeEntry              TimeEntry[]
 }
 
 model UnableToWorkWith {
@@ -168,6 +169,7 @@ model ConstructionSite {
   client         Client           @relation(fields: [clientId], references: [id], onDelete: Cascade)
   assignments    SiteAssignment[]
   operatives     SiteOperative[]
+  TimeEntry      TimeEntry[]
 
   @@index([clientId])
   @@index([status])
@@ -187,6 +189,7 @@ model SiteAssignment {
   status      AssignmentStatus @default(SCHEDULED)
   operative   Operative        @relation(fields: [operativeId], references: [id], onDelete: Cascade)
   site        ConstructionSite @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  TimeEntry   TimeEntry[]
 
   @@index([operativeId])
   @@index([siteId])
@@ -195,14 +198,14 @@ model SiteAssignment {
 }
 
 model SiteOperative {
-  id          Int              @id @default(autoincrement())
+  id          Int                 @id @default(autoincrement())
   siteId      String
   operativeId String
   startDate   DateTime
   endDate     DateTime
   status      SiteOperativeStatus @default(ASSIGNED)
-  operative   Operative        @relation(fields: [operativeId], references: [id], onDelete: Cascade)
-  site        ConstructionSite @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  operative   Operative           @relation(fields: [operativeId], references: [id], onDelete: Cascade)
+  site        ConstructionSite    @relation(fields: [siteId], references: [id], onDelete: Cascade)
 
   @@unique([siteId, operativeId, startDate])
   @@index([siteId])
@@ -227,6 +230,41 @@ model ClientJobType {
 
   @@index([clientId])
   @@index([name])
+}
+
+enum TimeEntryStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model TimeEntry {
+  id           String  @id @default(uuid())
+  operativeId  String
+  siteId       String
+  // Optional: keep a link to the specific assignment active that day
+  assignmentId String?
+
+  date          DateTime // store local day at 00:00 (see note)
+  startTime     String // "HH:mm"
+  endTime       String // "HH:mm"
+  breakDuration Int             @default(0) // minutes
+  totalHours    Decimal?        @db.Decimal(6, 2) // optionally computed on write
+  hourlyRate    Decimal         @db.Decimal(10, 2)
+  status        TimeEntryStatus @default(PENDING)
+  notes         String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  operative  Operative        @relation(fields: [operativeId], references: [id], onDelete: Cascade)
+  site       ConstructionSite @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  assignment SiteAssignment?  @relation(fields: [assignmentId], references: [id], onDelete: SetNull)
+
+  @@index([operativeId])
+  @@index([siteId])
+  @@index([date])
+  @@index([status])
 }
 
 enum EmploymentType {
