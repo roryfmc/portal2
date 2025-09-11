@@ -9,7 +9,6 @@ datasource db {
 
 model Operative {
   id                     String                  @id @default(uuid())
-  trade                  String?
   createdAt              DateTime                @default(now())
   updatedAt              DateTime                @updatedAt
   availability           Availability?
@@ -23,8 +22,6 @@ model Operative {
   unableToWorkWith       UnableToWorkWith[]      @relation("UnworkableSourceOperative")
   unworkableAsTarget     UnableToWorkWith[]      @relation("UnworkableTargetOperative")
   workSites              WorkSite[]
-
-  @@index([trade])
 }
 
 model UnableToWorkWith {

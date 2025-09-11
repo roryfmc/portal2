@@ -282,7 +282,6 @@ const removeUwItem = (type: "operative" | "client", id: string) => {
           status: CERT_STATUSES.includes(c.status as any) ? c.status : "VALID",
           certType: (c as any).certType ?? "GENERAL",
         })),
-        trade: operative.trade ?? undefined,
         createdAt: operative.createdAt ?? nowIso,
         updatedAt: nowIso,
       }

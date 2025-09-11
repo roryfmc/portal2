@@ -51,7 +51,6 @@ export interface WorkSite {
 
 export interface Operative {
   id: string
-  trade?: string
   personalDetails?: PersonalDetails
   complianceCertificates: ComplianceCertificate[]
   workSites: WorkSite[]
@@ -130,7 +129,6 @@ export type SiteOperative = {
     name: string
     email: string
     phone?: string
-    trade: string
     complianceCertificates: ComplianceCertificate[]
     status: string
     createdAt: string
@@ -188,7 +186,6 @@ export interface SimpleOperative {
   name: string
   email: string
   phone?: string
-  trade: string
   status: "available" | "deployed" | "on-leave" | "unavailable"
   createdAt: Date
 }

@@ -46,7 +46,7 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { trade, personalDetails, nextOfKin, rightToWork, availability, complianceCertificates, unableToWorkWith } = body ?? {}
+    const { personalDetails, nextOfKin, rightToWork, availability, complianceCertificates, unableToWorkWith } = body ?? {}
 
     if (!personalDetails?.fullName || !personalDetails?.email) {
       return NextResponse.json(
@@ -57,7 +57,6 @@ export async function POST(request: NextRequest) {
 
     const operative = await prisma.operative.create({
       data: {
-        ...(trade ? { trade } : {}),
 
         ...(personalDetails && personalDetails.fullName && personalDetails.email
           ? {

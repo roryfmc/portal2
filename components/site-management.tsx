@@ -284,9 +284,8 @@ export function SiteManagement() {
     const q = operativeSearchTerm.toLowerCase()
     return operatives.filter((operative) => {
       const name = operative.personalDetails?.fullName?.toLowerCase() || ""
-      const trade = (operative.trade || "").toLowerCase()
       const id = operative.id?.toLowerCase() || ""
-      const matchesText = name.includes(q) || trade.includes(q) || id.includes(q)
+      const matchesText = name.includes(q) || id.includes(q)
 
       const isDep = isOperativeDeployedForCurrentRange(operative.id)
       const matchesAvail =
@@ -891,7 +890,7 @@ export function SiteManagement() {
             <p className="font-medium">
               {operative.personalDetails?.fullName ?? operative.id}
             </p>
-            <p className="text-sm text-slate-600">{operative.trade}</p>
+            
           </div>
         </div>
       ))}
@@ -1179,7 +1178,7 @@ export function SiteManagement() {
                                             <p className="font-medium text-sm">
                                             {operative.personalDetails?.fullName || operative.id}
                                             </p>
-                                            <p className="text-xs text-slate-600">{operative.trade}</p>
+                                            
                                         </div>
 
                                         <div className="flex items-center gap-2">
@@ -1307,7 +1306,7 @@ export function SiteManagement() {
                                         <p className="font-medium text-sm">
                                             {operative.personalDetails?.fullName || operative.id}
                                         </p>
-                                        <p className="text-xs text-slate-600">{operative.trade}</p>
+                                        
                                         <Badge variant="secondary" className="text-xs mt-1">
                                             Currently Active
                                         </Badge>

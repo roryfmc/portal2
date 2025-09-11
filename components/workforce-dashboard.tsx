@@ -432,9 +432,6 @@ export function WorkforceDashboard() {
                 <div key={operative.id} className="flex items-center justify-between p-3 border rounded-lg">
                   <div className="space-y-1">
                     <p className="font-medium">{pd?.fullName ?? "Unnamed operative"}</p>
-                    {operative.trade && (
-                      <p className="text-sm text-muted-foreground">{operative.trade}</p>
-                    )}
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
                       <Mail className="h-3 w-3" />
                       <span>{pd?.email ?? ""}</span>

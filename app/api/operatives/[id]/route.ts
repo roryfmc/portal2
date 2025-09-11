@@ -12,12 +12,11 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     const id = params.id // âš ï¸ string UUID â€” do NOT cast to Number
     const body = await request.json()
 
-    const { trade, personalDetails, nextOfKin, rightToWork, availability, complianceCertificates, unableToWorkWith } = body ?? {}
+    const { personalDetails, nextOfKin, rightToWork, availability, complianceCertificates, unableToWorkWith } = body ?? {}
 
     const updated = await prisma.operative.update({
       where: { id },
       data: {
-        ...(trade ? { trade } : {}),
         ...(personalDetails
           ? {
               personalDetails: {
