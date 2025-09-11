@@ -262,7 +262,7 @@ export function SiteManagement() {
     const hasRisk = list.some(
       (c: any) => c.status === "EXPIRING_SOON" || c.status === "EXPIRED" || c.status === "INVALID",
     )
-    return (hasRisk ? "warning" : "success") as const
+    return hasRisk ? "warning" : "success"
   }
 
   // ---- Filtering (kept) ----

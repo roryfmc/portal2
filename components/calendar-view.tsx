@@ -391,11 +391,6 @@ export function CalendarView() {
               Active
             </Button>
           </div>
-
-          <Button className="flex items-center gap-2 ml-2" onClick={() => setShowBookingModal(true)}>
-            <Plus className="h-4 w-4" />
-            Assign Operative
-          </Button>
         </div>
       </div>
 

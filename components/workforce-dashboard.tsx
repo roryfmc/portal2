@@ -36,7 +36,18 @@ export function WorkforceDashboard() {
   }, [])
 
   const totalOperatives = operatives.length
-  const activeSites = sites.filter((s) => String(s.status).toLowerCase() === "active").length
+  const activeSites = useMemo(() => {
+  const today = new Date();
+  today.setHours(0,0,0,0);
+  return sites.filter((s: any) => {
+    const start = new Date(s.startDate);
+    const end = new Date(s.endDate);
+    start.setHours(0,0,0,0);
+    end.setHours(23,59,59,999);
+    return start <= today && today <= end;
+  }).length;
+  }, [sites]);
+
   const totalSites = sites.length
   const totalClients = clients.length
 
