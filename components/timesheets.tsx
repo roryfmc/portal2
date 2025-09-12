@@ -152,7 +152,20 @@ export default function TimesheetsPage() {
   const setAttendance = async (siteId: string, operativeId: string, dateISO: string, present: boolean) => {
     const key = `${siteId}::${operativeId}::${dateISO}`
     setAttendanceMap((prev) => ({ ...prev, [key]: present }))
-    // await persistAttendance(siteId, operativeId, dateISO, present)
+    try {
+      if (present) {
+        await fetch("/api/attendance", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ siteId, operativeId, date: dateISO, present: true }),
+        })
+      } else {
+        const qs = new URLSearchParams({ siteId, operativeId, date: dateISO })
+        await fetch(`/api/attendance?${qs}`, { method: "DELETE" })
+      }
+    } catch (e) {
+      console.error("Persist attendance failed", e)
+    }
   }
 
   // Preload this week’s attendance if you later have an API. (Keeps parity with SiteManagement if persisted.)
@@ -170,7 +183,7 @@ export default function TimesheetsPage() {
     //   .catch(() => {})
   }, [selectedWeek])
 
-  // Load DailyAttendance for deployed operatives in the selected week
+  // Load DailyAttendance for relevant operatives (DEPLOYED or OFFSITE overlapping this week)
   const attendanceLoadedRef = useRef<Record<string, boolean>>({})
   useEffect(() => {
     const run = async () => {
@@ -180,11 +193,19 @@ export default function TimesheetsPage() {
       const startDate = dates[0]
       const endDate = dates[6]
 
-      const deployed = assignments.filter(
-        (a: any) => String(a?.status || "").toUpperCase() === "DEPLOYED",
-      )
+      const weekStart = new Date(startDate)
+      const weekEnd = new Date(endDate)
+      const overlaps = (a: any) => {
+        const s = new Date(a.startDate)
+        const e = new Date(a.endDate)
+        return e >= weekStart && s <= weekEnd
+      }
+      const relevant = assignments.filter((a: any) => {
+        const st = String(a?.status || "").toUpperCase()
+        return (st === "DEPLOYED" || st === "OFFSITE") && overlaps(a)
+      })
 
-      for (const a of deployed) {
+      for (const a of relevant) {
         const loadKey = `${a.siteId}::${a.operativeId}::${startDate}..${endDate}`
         if (attendanceLoadedRef.current[loadKey]) continue
 
@@ -212,15 +233,21 @@ export default function TimesheetsPage() {
     run()
   }, [assignments, selectedWeek])
 
-  // ---------- active sites: any DEPLOYED on that site ----------
+  // ---------- active sites for timesheets: any DEPLOYED or OFFSITE overlapping selected week ----------
   const activeSites = useMemo(() => {
     const bySite = new Map<string, number>()
-    for (const a of assignments) {
-      const st = String((a as any).status || "").toUpperCase()
-      if (st === "DEPLOYED") bySite.set(String(a.siteId), 1)
+    const dates = getWeekDates(selectedWeek)
+    const weekStart = new Date(dates[0])
+    const weekEnd = new Date(dates[6])
+    for (const a of assignments as any) {
+      const st = String(a?.status || "").toUpperCase()
+      if (st !== "DEPLOYED" && st !== "OFFSITE") continue
+      const s = new Date(a.startDate)
+      const e = new Date(a.endDate)
+      if (e >= weekStart && s <= weekEnd) bySite.set(String(a.siteId), 1)
     }
     return sites.filter((s) => bySite.has(String(s.id)))
-  }, [assignments, sites])
+  }, [assignments, sites, selectedWeek])
 
   // ---------- weekly calc + UI handlers ----------
   const weekDates = getWeekDates(selectedWeek)
@@ -256,6 +283,28 @@ export default function TimesheetsPage() {
     })
   }
 
+  // Flexible entry: allow hours even if attendance isn't marked; auto-mark attendance when hours > 0
+  const handleWeeklyEntryChangeFlexible = (operativeId: string, siteId: string, date: string, hours: number) => {
+    const key = `${operativeId}-${siteId}`
+    const wasPresent = getDailyAttendance(siteId, operativeId, date)
+    if (!wasPresent && hours > 0) {
+      void setAttendance(siteId, operativeId, date, true)
+    }
+
+    setWeeklyEntries((prev) => {
+      const current: WeeklyTimeEntry =
+        prev[key] || { operativeId, siteId, weekStarting: selectedWeek, dailyHours: {}, totalHours: 0, notes: "" }
+      const nextDaily = { ...current.dailyHours, [date]: hours }
+      const totalHours = Object.values(nextDaily).reduce((s, h) => s + (h || 0), 0)
+      return { ...prev, [key]: { ...current, dailyHours: nextDaily, totalHours } }
+    })
+    setSavedEntries((prev) => {
+      const ns = new Set(prev)
+      ns.delete(key)
+      return ns
+    })
+  }
+
   // minimal API for time entries; if you don’t have these endpoints yet, this will still update local state
   const addTimeEntry = async (entry: Omit<TimeEntry, "id">) => {
     try {
@@ -286,11 +335,8 @@ export default function TimesheetsPage() {
 
   const saveWeeklyEntry = async (operativeId: string, siteId: string) => {
     const key = `${operativeId}-${siteId}`
-    const entry = weeklyEntries[key]
-    if (!entry || entry.totalHours <= 0) {
-      alert("Please enter hours for at least one day")
-      return
-    }
+    const entry: WeeklyTimeEntry =
+      weeklyEntries[key] || { operativeId, siteId, weekStarting: selectedWeek, dailyHours: {}, totalHours: 0, notes: "" }
 
     const rateKey = `${operativeId}-${siteId}`
     const op = operatives.find((o) => String(o.id) === String(operativeId)) as any
@@ -298,13 +344,14 @@ export default function TimesheetsPage() {
 
     const entries: any[] = []
     for (const [date, hours] of Object.entries(entry.dailyHours)) {
-      if (!hours || hours <= 0) continue
+      // Include 0-hour days so totalHours can persist as 0
+      if (hours == null || Number.isNaN(Number(hours)) || Number(hours) < 0) continue
       entries.push({
         operativeId,
         siteId,
         date,
         startTime: "08:00",
-        endTime: hoursToEndTime("08:00", hours),
+        endTime: hoursToEndTime("08:00", Number(hours)),
         breakDuration: 0,
         hourlyRate,
         status: "pending" as TimeEntryStatus,
@@ -401,7 +448,20 @@ export default function TimesheetsPage() {
           <div className="space-y-6">
             {activeSites.map((site) => {
               const client = clients.find((c) => Number(c.id) === Number(site.clientId))
-              const currentOps = getOperativesByStatus(site.id, "current")
+              // Include operatives who are DEPLOYED or OFFSITE overlapping the selected week
+              const dates = weekDates
+              const weekStart = new Date(dates[0])
+              const weekEnd = new Date(dates[6])
+              const opIds = new Set<string>()
+              for (const a of assignments as any) {
+                if (String(a.siteId) !== String(site.id)) continue
+                const st = String(a?.status || "").toUpperCase()
+                if (st !== "DEPLOYED" && st !== "OFFSITE") continue
+                const s = new Date(a.startDate)
+                const e = new Date(a.endDate)
+                if (e >= weekStart && s <= weekEnd) opIds.add(String(a.operativeId))
+              }
+              const currentOps = operatives.filter((o) => opIds.has(String(o.id)))
               const siteHours = getTotalHoursForSite(site.id)
               const sitePay = getTotalPayForSite(site.id)
 
@@ -502,7 +562,7 @@ export default function TimesheetsPage() {
                                 <Button
                                   size="sm"
                                   onClick={() => saveWeeklyEntry(op.id, site.id)}
-                                  disabled={isSaved || entry.totalHours <= 0}
+                                  disabled={isSaved}
                                   className="bg-green-600 hover:bg-green-700"
                                 >
                                   <Save className="w-4 h-4" />
@@ -520,19 +580,19 @@ export default function TimesheetsPage() {
                                     max={12}
                                     step={0.5}
                                     value={entry.dailyHours[date] ?? ""}
-                                    onChange={(e) =>
-                                      handleWeeklyEntryChange(
+                                  onChange={(e) =>
+                                      handleWeeklyEntryChangeFlexible(
                                         op.id,
                                         site.id,
                                         date,
                                         Number.isFinite(+e.target.value) ? Number(e.target.value) : 0,
                                       )
                                     }
-                                    disabled={!present || isSaved}
+                                    disabled={isSaved}
                                     className={`text-center text-sm ${
                                       !present ? "bg-red-50 border-red-200" : "bg-green-50 border-green-200"
                                     }`}
-                                    placeholder={present ? "0" : "N/A"}
+                                    placeholder={"0"}
                                   />
                                   <div className="text-xs text-center">
                                     {present ? (

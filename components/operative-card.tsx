@@ -50,6 +50,9 @@ export function OperativeCard({ operative, onEdit, onBack }: OperativeCardProps)
   const [currentAssignments, setCurrentAssignments] = useState<
     Array<{ siteName: string; startDate: string; endDate: string }>
   >([])
+  const [offsiteHistory, setOffsiteHistory] = useState<
+    Array<{ siteName: string; startDate: string; endDate: string; reason?: string; notes?: string }>
+  >([])
   const [watermarking, setWatermarking] = useState<string | null>(null)
   const [savingCert, setSavingCert] = useState(false)
 
@@ -94,7 +97,10 @@ export function OperativeCard({ operative, onEdit, onBack }: OperativeCardProps)
           const e = new Date(end.getFullYear(), end.getMonth(), end.getDate())
           return d >= s && d <= e
         }
-        const current = (data as any[])
+        const all = (data as any[])
+          .filter((a) => String(a.operativeId) === String(operative.id))
+
+        const current = all
           .filter((a) => String(a.operativeId) === String(operative.id))
           .filter((a) => String(a?.status || "").toUpperCase() !== "OFFSITE")
           .filter(
@@ -107,9 +113,21 @@ export function OperativeCard({ operative, onEdit, onBack }: OperativeCardProps)
             startDate: String(a.startDate),
             endDate: String(a.endDate),
           }))
+
+        const offsite = all
+          .filter((a) => String(a?.status || "").toUpperCase() === "OFFSITE")
+          .map((a) => ({
+            siteName: (a as any)?.site?.name || "Unknown site",
+            startDate: String(a.startDate),
+            endDate: String(a.endDate),
+            reason: (a as any)?.offsiteReason || "",
+            notes: (a as any)?.offsiteNotes || "",
+          }))
+          .sort((a, b) => new Date(b.endDate).getTime() - new Date(a.endDate).getTime())
         if (!ignore) {
           setIsDeployedNow(current.length > 0)
           setCurrentAssignments(current)
+          setOffsiteHistory(offsite)
         }
       } catch {}
     }
@@ -680,12 +698,65 @@ export function OperativeCard({ operative, onEdit, onBack }: OperativeCardProps)
                       </div>
                     </div>
                   ))}
+                  {offsiteHistory.length > 0 && (
+                    <div className="mt-6">
+                      <h4 className="font-semibold text-slate-900 mb-2">Off Site Records</h4>
+                      <div className="space-y-3">
+                        {offsiteHistory.map((rec, idx) => (
+                          <div key={`${rec.siteName}-${rec.startDate}-${idx}`} className="border rounded-lg p-3 bg-slate-50">
+                            <div className="flex items-start justify-between">
+                              <div>
+                                <p className="font-medium">{rec.siteName}</p>
+                                <p className="text-xs text-slate-600">
+                                  {new Date(rec.startDate).toLocaleDateString()} – {new Date(rec.endDate).toLocaleDateString()}
+                                </p>
+                              </div>
+                              <Badge variant="outline" className="text-xs">Off Site</Badge>
+                            </div>
+                            {rec.reason && (
+                              <p className="text-xs text-slate-700 mt-2">Reason: {rec.reason}</p>
+                            )}
+                            {rec.notes && (
+                              <p className="text-xs text-slate-700 mt-1">Notes: {rec.notes}</p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               ) : (
-                <div className="text-center py-12">
-                  <Building className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-                  <p className="text-muted-foreground">No previous work sites recorded</p>
-                </div>
+                offsiteHistory.length > 0 ? (
+                  <div className="mt-0">
+                    <h4 className="font-semibold text-slate-900 mb-2">Off Site Records</h4>
+                    <div className="space-y-3">
+                      {offsiteHistory.map((rec, idx) => (
+                        <div key={`${rec.siteName}-${rec.startDate}-${idx}`} className="border rounded-lg p-3 bg-slate-50">
+                          <div className="flex items-start justify-between">
+                            <div>
+                              <p className="font-medium">{rec.siteName}</p>
+                              <p className="text-xs text-slate-600">
+                                {new Date(rec.startDate).toLocaleDateString()} – {new Date(rec.endDate).toLocaleDateString()}
+                              </p>
+                            </div>
+                            <Badge variant="outline" className="text-xs">Off Site</Badge>
+                          </div>
+                          {rec.reason && (
+                            <p className="text-xs text-slate-700 mt-2">Reason: {rec.reason}</p>
+                          )}
+                          {rec.notes && (
+                            <p className="text-xs text-slate-700 mt-1">Notes: {rec.notes}</p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-center py-12">
+                    <Building className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+                    <p className="text-muted-foreground">No previous work sites recorded</p>
+                  </div>
+                )
               )}
             </CardContent>
           </Card>

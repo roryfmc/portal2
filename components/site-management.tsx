@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -592,6 +593,7 @@ export function SiteManagement() {
   // KICK OFF MODAL
   const [kickOffModal, setKickOffModal] = useState<{ siteId: string; operativeId: string } | null>(null)
   const [kickOffReason, setKickOffReason] = useState<string>("")
+  const [kickOffNotes, setKickOffNotes] = useState<string>("")
 
     // WEEK DATES FOR TIMESHEET MANAGEMENT
 // --- Attendance helpers & week scaffold ---
@@ -719,13 +721,14 @@ export function SiteManagement() {
       const res = await fetch(`/api/assignments?id=${target.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...target, status: "OFFSITE", reason: kickOffReason }),
+        body: JSON.stringify({ ...target, status: "OFFSITE", reason: kickOffReason, notes: kickOffNotes }),
       })
       if (!res.ok) throw new Error("Failed to update assignment")
 
       await fetchAssignments()
       setKickOffModal(null)
       setKickOffReason("")
+      setKickOffNotes("")
       toast({ title: "Operative moved off site", description: kickOffReason ? `Reason: ${kickOffReason}` : undefined })
     } catch (e) {
       console.error(e)
@@ -789,7 +792,7 @@ export function SiteManagement() {
               <div className="space-y-4">
                 <div className="space-y-2">
                   <Label htmlFor="reason">Reason</Label>
-                  <Select >
+                  <Select onValueChange={(v) => setKickOffReason(v)}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select reason" />
                     </SelectTrigger>
@@ -803,8 +806,12 @@ export function SiteManagement() {
                     </SelectContent>
                   </Select>
                 </div>
+                <div className="space-y-2">
+                  <Label htmlFor="notes">Notes (optional)</Label>
+                  <Textarea id="notes" placeholder="Add any additional context..." value={kickOffNotes} onChange={(e) => setKickOffNotes(e.target.value)} />
+                </div>
                 <div className="flex gap-2">
-                  <Button >
+                  <Button onClick={handleKickOff}>
                     Confirm Removal
                   </Button>
                   <Button variant="outline" onClick={() => setKickOffModal(null)}>
@@ -1508,6 +1515,7 @@ export function SiteManagement() {
                                 const start = new Date(a.startDate)
                                 const end = new Date(a.endDate)
                                 const reason = a.offsiteReason || ""
+                                const notes = (a as any).offsiteNotes || ""
                                 return (
                                   <div key={a.id} className="p-3 border rounded bg-slate-50">
                                     <div className="flex items-center justify-between">
@@ -1521,6 +1529,9 @@ export function SiteManagement() {
                                     </div>
                                     {reason && (
                                       <p className="text-xs text-slate-700 mt-2">Reason: {reason}</p>
+                                    )}
+                                    {notes && (
+                                      <p className="text-xs text-slate-700 mt-1">Notes: {notes}</p>
                                     )}
                                   </div>
                                 )

@@ -125,7 +125,7 @@ export async function PUT(req: Request) {
     if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 })
 
     const body = await req.json().catch(() => ({}))
-    const { startDate, endDate, status, reason } = body || {}
+    const { startDate, endDate, status, reason, notes } = body || {}
 
     const data: any = {}
     if (startDate) data.startDate = new Date(startDate)
@@ -135,14 +135,16 @@ export async function PUT(req: Request) {
       if (["AVAILABLE", "ASSIGNED", "DEPLOYED", "OFFSITE"].includes(desired)) {
         data.status = desired as any
         if (desired === "OFFSITE") {
-          // If caller didn't specify an endDate, end the assignment as of yesterday to avoid being considered active
+          // If caller didn't specify an endDate, end the assignment on the removal day (today)
           if (!data.endDate) {
-            const now = new Date(); now.setHours(0,0,0,0)
-            const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1)
-            data.endDate = yesterday as any
+            const today = new Date(); today.setHours(0,0,0,0)
+            data.endDate = today as any
           }
           if (typeof reason === "string" && reason.trim().length) {
             ;(data as any).offsiteReason = reason.trim()
+          }
+          if (typeof notes === "string" && notes.trim().length) {
+            ;(data as any).offsiteNotes = notes.trim()
           }
         }
       }
@@ -183,11 +185,14 @@ export async function PUT(req: Request) {
           const e = new Date(existing.endDate); e.setHours(0,0,0,0)
           patch.endDate = e < tomorrow ? tomorrow : e
         } else if (want === "OFFSITE") {
-          // make the assignment end yesterday so it is not considered active or assigned today
-          const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1)
-          patch.endDate = yesterday
+          // end the assignment on the removal day (today)
+          const today = new Date(now); today.setHours(0,0,0,0)
+          patch.endDate = today
           if (typeof reason === "string" && reason.trim().length) {
             patch.offsiteReason = reason.trim()
+          }
+          if (typeof notes === "string" && notes.trim().length) {
+            ;(patch as any).offsiteNotes = notes.trim()
           }
         }
 

@@ -207,6 +207,7 @@ model SiteOperative {
   endDate     DateTime
   status      SiteOperativeStatus @default(ASSIGNED)
   offsiteReason String?
+  offsiteNotes  String?
   operative   Operative           @relation(fields: [operativeId], references: [id], onDelete: Cascade)
   site        ConstructionSite    @relation(fields: [siteId], references: [id], onDelete: Cascade)
 
