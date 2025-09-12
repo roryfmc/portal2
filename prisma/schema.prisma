@@ -23,6 +23,7 @@ model Operative {
   unworkableAsTarget     UnableToWorkWith[]      @relation("UnworkableTargetOperative")
   workSites              WorkSite[]
   TimeEntry              TimeEntry[]
+  DailyAttendance        DailyAttendance[]
 }
 
 model UnableToWorkWith {
@@ -155,21 +156,22 @@ model Client {
 }
 
 model ConstructionSite {
-  id             String           @id @default(uuid())
-  name           String
-  address        String
-  clientId       Int
-  projectType    String
-  startDate      DateTime
-  endDate        DateTime
-  requiredTrades String[]
-  maxOperatives  Int
-  createdAt      DateTime         @default(now())
-  status         String
-  client         Client           @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  assignments    SiteAssignment[]
-  operatives     SiteOperative[]
-  TimeEntry      TimeEntry[]
+  id              String            @id @default(uuid())
+  name            String
+  address         String
+  clientId        Int
+  projectType     String
+  startDate       DateTime
+  endDate         DateTime
+  requiredTrades  String[]
+  maxOperatives   Int
+  createdAt       DateTime          @default(now())
+  status          String
+  client          Client            @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  assignments     SiteAssignment[]
+  operatives      SiteOperative[]
+  TimeEntry       TimeEntry[]
+  DailyAttendance DailyAttendance[]
 
   @@index([clientId])
   @@index([status])
@@ -265,6 +267,25 @@ model TimeEntry {
   @@index([siteId])
   @@index([date])
   @@index([status])
+}
+
+model DailyAttendance {
+  id          String   @id @default(uuid())
+  siteId      String
+  operativeId String
+  /**
+   * Store as UTC midnight; you’ll normalize in code
+   */
+  date        DateTime
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  site      ConstructionSite @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  operative Operative        @relation(fields: [operativeId], references: [id], onDelete: Cascade)
+
+  @@unique([siteId, operativeId, date]) // one mark per day
+  @@index([siteId, date])
+  @@index([operativeId, date])
 }
 
 enum EmploymentType {

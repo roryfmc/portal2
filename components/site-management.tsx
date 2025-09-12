@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -33,7 +33,6 @@ import {
 } from "lucide-react"
 import type { ConstructionSite, Operative, SiteOperative, Client } from "@/lib/types"
 import { toast } from "@/components/ui/use-toast"
-import { Navigation } from "@/components/navigation"
 
 // ---- Types ----
 
@@ -137,6 +136,10 @@ export function SiteManagement() {
     }
 
     return warnings
+  }
+  const getDailyAttendance = (siteId: string, operativeId: string, dateISO: string): boolean => {
+  const key = `${siteId}::${operativeId}::${dateISO}`
+  return Boolean(attendanceMap[key])
   }
 
   // ---- Fetching (kept) ----
@@ -508,15 +511,15 @@ export function SiteManagement() {
 
 
   // Return operatives NOT already assigned to this site AND not already selected in the modal
-    const getUnassignedOperatives = (siteId: string) => {
+  const getUnassignedOperatives = (siteId: string) => {
     const assignedIds = new Set(getAssignedOperatives(siteId).map((o) => o.id))
     const selectedIds = new Set(selectedOperatives)
     // Use filteredOperatives to respect search/filters if you later add them above the modal
     return filteredOperatives.filter((op) => !assignedIds.has(op.id) && !selectedIds.has(op.id))
-    }
+  }
 
 // Add to current selection with your guards (max, overlap, incompatibilities)
-    const assignOperativeToSite = (siteId: string, operativeId: string) => {
+  const assignOperativeToSite = (siteId: string, operativeId: string) => {
     const op = operatives.find((o) => o.id === operativeId)
     if (!op) return
 
@@ -581,31 +584,32 @@ export function SiteManagement() {
 
   // Normal add
     setSelectedOperatives((prev) => (prev.includes(operativeId) ? prev : [...prev, operativeId]))
-    }
+  }
   // KICK OFF MODAL
-    const [kickOffModal, setKickOffModal] = useState<{ siteId: string; operativeId: string } | null>(null)
-    const [kickOffReason, setKickOffReason] = useState<string>("")
+  const [kickOffModal, setKickOffModal] = useState<{ siteId: string; operativeId: string } | null>(null)
+  const [kickOffReason, setKickOffReason] = useState<string>("")
 
     // WEEK DATES FOR TIMESHEET MANAGEMENT
 // --- Attendance helpers & week scaffold ---
-    const [attendanceMap, setAttendanceMap] = useState<Record<string, boolean>>({})
+  const [attendanceMap, setAttendanceMap] = useState<Record<string, boolean>>({})
+  const loadedRef = useRef<Record<string, boolean>>({})
 
     // local-safe YYYY-MM-DD (no UTC shift)
-    const toLocalISO = (d: Date) => {
+  const toLocalISO = (d: Date) => {
     const y = d.getFullYear()
     const m = String(d.getMonth() + 1).padStart(2, "0")
     const day = String(d.getDate()).padStart(2, "0")
     return `${y}-${m}-${day}`
-    }
-    const parseLocalISO = (s: string) => {
+  }
+  const parseLocalISO = (s: string) => {
     const [y, m, d] = s.split("-").map(Number)
     const dt = new Date(y, m - 1, d)
     dt.setHours(0, 0, 0, 0)
     return dt
-    }
+  }
 
     // Monday → Sunday for the current week (local)
-    const getCurrentWeekDates = () => {
+  const getCurrentWeekDates = () => {
     const today = new Date()
     today.setHours(0, 0, 0, 0)
     const diffToMonday = (today.getDay() + 6) % 7 // Mon=0,...,Sun=6
@@ -618,70 +622,112 @@ export function SiteManagement() {
         days.push(toLocalISO(d))
     }
     return days
-    }
+  }
 
-    const weekDates = useMemo(() => getCurrentWeekDates(), [])
-    const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+  const weekDates = useMemo(() => getCurrentWeekDates(), [])
+  const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
-    // read attendance for a day
-    const getDailyAttendance = (siteId: string, operativeId: string, dateISO: string): boolean => {
-    const key = `${siteId}::${operativeId}::${dateISO}`
-    return Boolean(attendanceMap[key])
+  useEffect(() => {
+    const run = async () => {
+      if (!assignments.length || weekDates.length !== 7) return
+      const startDate = weekDates[0]
+      const endDate = weekDates[6]
+
+      const deployed = assignments.filter(
+        (a: any) => String(a?.status || "").toUpperCase() === "DEPLOYED"
+      )
+
+      for (const a of deployed) {
+        const loadKey = `${a.siteId}::${a.operativeId}::${startDate}..${endDate}`
+        if (loadedRef.current[loadKey]) continue
+
+        const qs = new URLSearchParams({
+          siteId: String(a.siteId),
+          operativeId: String(a.operativeId),
+          startDate,
+          endDate,
+        })
+        const res = await fetch(`/api/attendance?${qs}`)
+        if (!res.ok) continue
+        const rows = (await res.json()) as { date: string; present: boolean }[]
+
+        setAttendanceMap(prev => {
+          const next = { ...prev }
+          for (const r of rows) {
+            next[`${a.siteId}::${a.operativeId}::${r.date}`] = !!r.present
+          }
+          return next
+        })
+
+        loadedRef.current[loadKey] = true
+      }
     }
+    run()
+  }, [assignments, weekDates])
 
     // toggle/set attendance (in-memory; add your API call if you want to persist)
-    const updateDailyAttendance = async (
+  const updateDailyAttendance = async (
     siteId: string,
     operativeId: string,
     dateISO: string,
     present: boolean
-    ) => {
+  ) => {
     const key = `${siteId}::${operativeId}::${dateISO}`
-    setAttendanceMap((prev) => ({ ...prev, [key]: present }))
+    // optimistic
+    setAttendanceMap(prev => ({ ...prev, [key]: present }))
 
-    // OPTIONAL: persist
-    // await fetch("/api/attendance", {
-    //   method: "POST",
-    //   headers: { "Content-Type": "application/json" },
-    //   body: JSON.stringify({ siteId, operativeId, date: dateISO, present }),
-    // })
+    try {
+      if (present) {
+        const res = await fetch("/api/attendance", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ siteId, operativeId, date: dateISO, present: true }),
+        })
+        if (!res.ok) throw new Error("POST failed")
+      } else {
+        const qs = new URLSearchParams({ siteId, operativeId, date: dateISO })
+        const res = await fetch(`/api/attendance?${qs}`, { method: "DELETE" })
+        if (!res.ok) throw new Error("DELETE failed")
+      }
+    } catch (e) {
+      // rollback
+      setAttendanceMap(prev => ({ ...prev, [key]: !present }))
+      toast({ title: "Couldn’t save attendance", description: "Please try again." })
     }
+  }
 
     // helper for disabling future days in your buttons
-    const todayISO = toLocalISO(new Date())
-    const isFutureDate = (dateISO: string) => parseLocalISO(dateISO) > parseLocalISO(todayISO)
-    const handleKickOff = async () => {
-    if (!kickOffModal) return
+  const todayISO = toLocalISO(new Date())
+  const isFutureDate = (dateISO: string) => parseLocalISO(dateISO) > parseLocalISO(todayISO)
+  const handleKickOff = async () => {
+  if (!kickOffModal) return
     try {
-        const target = assignments.find(
+      const target = assignments.find(
         (a) =>
-            String(a.siteId) === String(kickOffModal.siteId) &&
-            String(a.operativeId) === String(kickOffModal.operativeId)
-        )
-        if (!target) {
+          String(a.siteId) === String(kickOffModal.siteId) &&
+          String(a.operativeId) === String(kickOffModal.operativeId)
+      )
+      if (!target) {
         toast({ title: "No assignment found", description: "Nothing to update for this operative." })
         return
-        }
+      }
 
-        // Move to OFFSITE (or COMPLETED if you prefer—just change the status here)
-        const res = await fetch(`/api/assignments?id=${target.id}`, {
+      const res = await fetch(`/api/assignments?id=${target.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...target, status: "OFFSITE", reason: kickOffReason }),
-        })
-        if (!res.ok) throw new Error("Failed to update assignment")
+      })
+      if (!res.ok) throw new Error("Failed to update assignment")
 
-        await fetchAssignments()
-        setKickOffModal(null)
-        setKickOffReason("")
-        toast({ title: "Operative moved off site", description: kickOffReason ? `Reason: ${kickOffReason}` : undefined })
+      await fetchAssignments()
+      setKickOffModal(null)
+      setKickOffReason("")
+      toast({ title: "Operative moved off site", description: kickOffReason ? `Reason: ${kickOffReason}` : undefined })
     } catch (e) {
-        console.error(e)
-        toast({ title: "Update failed", description: "Could not move operative off site." })
+      console.error(e)
+      toast({ title: "Update failed", description: "Could not move operative off site." })
     }
-    }
-
-
+  }
 
 
   // ---- UI ----
@@ -1369,7 +1415,7 @@ export function SiteManagement() {
                                         </div>
                                     </div>
 
-                                    {/* Attendance (unchanged UI; relies on your existing helpers) */}
+                                    {/* Attendance*/}
                                     <div className="border-t pt-3">
                                         <p className="text-xs font-medium text-slate-700 mb-2">
                                         Daily Attendance This Week:
@@ -1377,9 +1423,9 @@ export function SiteManagement() {
                                         <div className="grid grid-cols-7 gap-1">
                                         {weekDates.map((date, index) => {
                                             const isPresent = getDailyAttendance(site.id, operative.id, date)
-                                            const todayISO = new Date().toISOString().split("T")[0]
+                                            const todayISO = toLocalISO(new Date())
+                                            const isPastDate = parseLocalISO(date) < parseLocalISO(todayISO)
                                             const isToday = date === todayISO
-                                            const isPastDate = new Date(date) < new Date(todayISO)
 
                                             return (
                                             <div key={date} className="text-center">
