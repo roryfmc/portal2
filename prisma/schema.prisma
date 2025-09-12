@@ -206,6 +206,7 @@ model SiteOperative {
   startDate   DateTime
   endDate     DateTime
   status      SiteOperativeStatus @default(ASSIGNED)
+  offsiteReason String?
   operative   Operative           @relation(fields: [operativeId], references: [id], onDelete: Cascade)
   site        ConstructionSite    @relation(fields: [siteId], references: [id], onDelete: Cascade)
 
@@ -234,40 +235,7 @@ model ClientJobType {
   @@index([name])
 }
 
-enum TimeEntryStatus {
-  PENDING
-  APPROVED
-  REJECTED
-}
-
-model TimeEntry {
-  id           String  @id @default(uuid())
-  operativeId  String
-  siteId       String
-  // Optional: keep a link to the specific assignment active that day
-  assignmentId String?
-
-  date          DateTime // store local day at 00:00 (see note)
-  startTime     String // "HH:mm"
-  endTime       String // "HH:mm"
-  breakDuration Int             @default(0) // minutes
-  totalHours    Decimal?        @db.Decimal(6, 2) // optionally computed on write
-  hourlyRate    Decimal         @db.Decimal(10, 2)
-  status        TimeEntryStatus @default(PENDING)
-  notes         String?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  operative  Operative        @relation(fields: [operativeId], references: [id], onDelete: Cascade)
-  site       ConstructionSite @relation(fields: [siteId], references: [id], onDelete: Cascade)
-  assignment SiteAssignment?  @relation(fields: [assignmentId], references: [id], onDelete: SetNull)
-
-  @@index([operativeId])
-  @@index([siteId])
-  @@index([date])
-  @@index([status])
-}
+// Removed duplicate enum/model for TimeEntry; consolidated below
 
 model DailyAttendance {
   id          String   @id @default(uuid())
@@ -287,6 +255,34 @@ model DailyAttendance {
   @@index([siteId, date])
   @@index([operativeId, date])
 }
+
+model TimeEntry {
+  id            String   @id @default(uuid())
+  siteId        String
+  operativeId   String
+  assignmentId  String?
+
+  date          DateTime
+  startTime     String
+  endTime       String
+  breakDuration Int      @default(0)
+  totalHours    Decimal  @default(0)
+  hourlyRate    Decimal?
+  status        String   @default("pending")
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  operative  Operative        @relation(fields: [operativeId], references: [id], onDelete: Cascade)
+  site       ConstructionSite @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  assignment SiteAssignment?  @relation(fields: [assignmentId], references: [id], onDelete: SetNull)
+
+  // Indexes/constraints
+  @@unique([siteId, operativeId, date], name: "siteId_operativeId_date")
+  @@index([siteId, operativeId, date])
+}
+
 
 enum EmploymentType {
   SELF_EMPLOYED

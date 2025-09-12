@@ -39,29 +39,76 @@ export async function POST(req: Request) {
     }
 
     // IDs are UUID strings in the schema. Do NOT cast to Number.
-    // Try to create with status; if schema is not migrated yet, retry without status
+    // Prefer full site duration when assigning (use site's start/end if available)
+    let dStart: Date | null = null
+    let dEnd: Date | null = null
+    try {
+      const site = await prisma.constructionSite.findUnique({
+        where: { id: String(siteId) },
+        select: { startDate: true, endDate: true },
+      })
+      if (site?.startDate && site?.endDate) {
+        dStart = new Date(site.startDate)
+        dEnd = new Date(site.endDate)
+      }
+    } catch {}
+    if (!dStart || !dEnd) {
+      dStart = new Date(startDate)
+      dEnd = new Date(endDate)
+    }
+
+    // Idempotent create: if the composite unique (siteId, operativeId, startDate) exists,
+    // update it instead of throwing P2002. This avoids duplicate errors when re-assigning.
     let created: any
     try {
-      created = await prisma.siteOperative.create({
-        data: {
+      created = await prisma.siteOperative.upsert({
+        where: {
+          siteId_operativeId_startDate: {
+            siteId: String(siteId),
+            operativeId: String(operativeId),
+            startDate: dStart!,
+          },
+        },
+        update: {
+          endDate: dEnd!,
+          status: "ASSIGNED" as any,
+        },
+        create: {
           operativeId: String(operativeId),
           siteId: String(siteId),
-          startDate: new Date(startDate),
-          endDate: new Date(endDate),
+          startDate: dStart!,
+          endDate: dEnd!,
           status: "ASSIGNED" as any,
         },
         include: { operative: true, site: true },
       })
     } catch (_e) {
-      created = await prisma.siteOperative.create({
-        data: {
-          operativeId: String(operativeId),
+      // Fallback if composite unique name differs: manual find/update
+      const existing = await prisma.siteOperative.findFirst({
+        where: {
           siteId: String(siteId),
-          startDate: new Date(startDate),
-          endDate: new Date(endDate),
+          operativeId: String(operativeId),
+          startDate: dStart!,
         },
-        include: { operative: true, site: true },
       })
+      if (existing) {
+        created = await prisma.siteOperative.update({
+          where: { id: existing.id as any },
+          data: { endDate: dEnd!, status: "ASSIGNED" as any },
+          include: { operative: true, site: true },
+        })
+      } else {
+        created = await prisma.siteOperative.create({
+          data: {
+            siteId: String(siteId),
+            operativeId: String(operativeId),
+            startDate: dStart!,
+            endDate: dEnd!,
+            status: "ASSIGNED" as any,
+          },
+          include: { operative: true, site: true },
+        })
+      }
     }
 
     return NextResponse.json({ ...created, status: created.status || computeTemporalStatus(created) })
@@ -78,7 +125,7 @@ export async function PUT(req: Request) {
     if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 })
 
     const body = await req.json().catch(() => ({}))
-    const { startDate, endDate, status } = body || {}
+    const { startDate, endDate, status, reason } = body || {}
 
     const data: any = {}
     if (startDate) data.startDate = new Date(startDate)
@@ -128,6 +175,9 @@ export async function PUT(req: Request) {
           // make the assignment end yesterday so it is not considered active or assigned today
           const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1)
           patch.endDate = yesterday
+          if (typeof reason === "string" && reason.trim().length) {
+            patch.offsiteReason = reason.trim()
+          }
         }
 
         updated = await prisma.siteOperative.update({

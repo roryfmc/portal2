@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Navigation } from "@/components/navigation"
-import { Clock, Users, Building, Save, Calculator, CheckCircle, AlertCircle } from "lucide-react"
+import { Clock, Users, Building, Save, Calculator, CheckCircle, AlertCircle, Pencil } from "lucide-react"
 import type { ConstructionSite, Operative, Client, SiteOperative, TimeEntry, TimeEntryStatus } from "@/lib/types"
 
 // ----------------- helpers aligned with SiteManagement -----------------
@@ -83,6 +83,7 @@ export default function TimesheetsPage() {
 
   const [weeklyEntries, setWeeklyEntries] = useState<Record<string, WeeklyTimeEntry>>({})
   const [savedEntries, setSavedEntries] = useState<Set<string>>(new Set())
+  const [rateOverrides, setRateOverrides] = useState<Record<string, number>>({})
 
   // fetchers (same endpoints your SiteManagement uses)
   useEffect(() => {
@@ -169,6 +170,48 @@ export default function TimesheetsPage() {
     //   .catch(() => {})
   }, [selectedWeek])
 
+  // Load DailyAttendance for deployed operatives in the selected week
+  const attendanceLoadedRef = useRef<Record<string, boolean>>({})
+  useEffect(() => {
+    const run = async () => {
+      if (!assignments.length) return
+      const dates = getWeekDates(selectedWeek)
+      if (dates.length !== 7) return
+      const startDate = dates[0]
+      const endDate = dates[6]
+
+      const deployed = assignments.filter(
+        (a: any) => String(a?.status || "").toUpperCase() === "DEPLOYED",
+      )
+
+      for (const a of deployed) {
+        const loadKey = `${a.siteId}::${a.operativeId}::${startDate}..${endDate}`
+        if (attendanceLoadedRef.current[loadKey]) continue
+
+        try {
+          const qs = new URLSearchParams({
+            siteId: String(a.siteId),
+            operativeId: String(a.operativeId),
+            startDate,
+            endDate,
+          })
+          const res = await fetch(`/api/attendance?${qs}`)
+          if (!res.ok) continue
+          const rows = (await res.json()) as { date: string; present: boolean }[]
+          setAttendanceMap((prev) => {
+            const next = { ...prev }
+            for (const r of rows) {
+              next[`${a.siteId}::${a.operativeId}::${r.date}`] = !!r.present
+            }
+            return next
+          })
+          attendanceLoadedRef.current[loadKey] = true
+        } catch {}
+      }
+    }
+    run()
+  }, [assignments, selectedWeek])
+
   // ---------- active sites: any DEPLOYED on that site ----------
   const activeSites = useMemo(() => {
     const bySite = new Map<string, number>()
@@ -222,8 +265,6 @@ export default function TimesheetsPage() {
         body: JSON.stringify(entry),
       })
       if (res.ok) {
-        const saved = (await res.json()) as TimeEntry
-        setTimeEntries((prev) => [saved, ...prev])
         return
       }
     } catch {}
@@ -238,11 +279,7 @@ export default function TimesheetsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(patch),
       })
-      if (res.ok) {
-        const saved = (await res.json()) as TimeEntry
-        setTimeEntries((prev) => prev.map((t) => (t.id === id ? saved : t)))
-        return
-      }
+      if (res.ok) { return }
     } catch {}
     setTimeEntries((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } as TimeEntry : t)))
   }
@@ -255,23 +292,37 @@ export default function TimesheetsPage() {
       return
     }
 
-    const op = operatives.find((o) => String(o.id) === String(operativeId))
+    const rateKey = `${operativeId}-${siteId}`
+    const op = operatives.find((o) => String(o.id) === String(operativeId)) as any
     const hourlyRate = (op as any)?.hourlyRate || 0
 
+    const entries: any[] = []
     for (const [date, hours] of Object.entries(entry.dailyHours)) {
       if (!hours || hours <= 0) continue
-      await addTimeEntry({
+      entries.push({
         operativeId,
         siteId,
         date,
         startTime: "08:00",
         endTime: hoursToEndTime("08:00", hours),
         breakDuration: 0,
-        totalHours: hours,
         hourlyRate,
         status: "pending" as TimeEntryStatus,
         notes: entry.notes || "",
       })
+    }
+    if (entries.length) {
+      try {
+        await fetch("/api/time-entries", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ entries }),
+        })
+      } catch {}
+      setTimeEntries((prev) => [
+        ...entries.map((e) => ({ id: crypto.randomUUID(), totalHours: Number(entry.dailyHours[e.date] || 0), ...e })),
+        ...prev,
+      ] as any)
     }
     setSavedEntries((prev) => new Set([...prev, key]))
   }
@@ -300,8 +351,9 @@ export default function TimesheetsPage() {
       .filter(([key]) => key.endsWith(`-${siteId}`))
       .reduce((sum, [key, e]) => {
         const operativeId = key.split("-")[0]
-        const op = operatives.find((o) => String(o.id) === String(operativeId))
-        const rate = (op as any)?.hourlyRate || 0
+        const rateKey = `${operativeId}-${siteId}`
+        const op = operatives.find((o) => String(o.id) === String(operativeId)) as any
+        const rate = (rateOverrides[rateKey] ?? Number(op?.hourlyRate)) || 0
         return sum + e.totalHours * rate
       }, 0)
 
@@ -312,8 +364,8 @@ export default function TimesheetsPage() {
   return (
     <div className="min-h-screen ">
       <div>
-        <h1 className="text-3xl font-bold text-slate-900">Weekly Timesheet Portal</h1>
-        <p className="text-slate-600 mt-2">Weekly hour entry based on daily attendance tracking</p>
+        <h1 className="text-3xl font-bold text-slate-900">Weekly Timesheet</h1>
+        <p className="text-slate-600 mt-2">Enter daily hours and set pay rates per operative</p>
       </div>
       <main className="container mx-auto px-4 py-8">
         <div className="flex items-center justify-between mb-8">
@@ -407,7 +459,7 @@ export default function TimesheetsPage() {
                             notes: "",
                           }
                         const attendance = getAttendanceForWeek(op.id, site.id)
-                        const rate = (op as any)?.hourlyRate || 0
+                        const rate = ((rateOverrides[key] ?? Number((op as any)?.hourlyRate)) || 0) as number
                         const weeklyPay = entry.totalHours * rate
                         const isSaved = savedEntries.has(key)
 
@@ -432,6 +484,21 @@ export default function TimesheetsPage() {
                                     Unsaved
                                   </Badge>
                                 )}
+                                {isSaved && (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() =>
+                                      setSavedEntries((prev) => {
+                                        const ns = new Set(prev)
+                                        ns.delete(key)
+                                        return ns
+                                      })
+                                    }
+                                  >
+                                    <Pencil className="w-4 h-4 mr-1" /> Edit
+                                  </Button>
+                                )}
                                 <Button
                                   size="sm"
                                   onClick={() => saveWeeklyEntry(op.id, site.id)}
@@ -444,7 +511,7 @@ export default function TimesheetsPage() {
                             </div>
 
                             <div className="grid grid-cols-8 gap-2 mb-4">
-                              <div className="flex items-center text-sm font-medium">Daily Hours:</div>
+                              <div className="flex items-center text-sm font-medium">Day Present:</div>
                               {attendance.map(({ date, present }) => (
                                 <div key={`${key}-${date}`} className="space-y-1">
                                   <Input
@@ -488,6 +555,20 @@ export default function TimesheetsPage() {
                                 <div className="h-10 px-3 py-2 border rounded-md bg-slate-50 flex items-center">
                                   <span className="font-medium">{entry.totalHours.toFixed(1)}h</span>
                                 </div>
+                              </div>
+                              <div className="space-y-2">
+                                <Label>Pay Rate (£/hr)</Label>
+                                <Input
+                                  type="number"
+                                  min={0}
+                                  step={0.5}
+                                  value={((rateOverrides[key] ?? Number((op as any)?.hourlyRate)) || 0) as number}
+                                  onChange={(e) =>
+                                    setRateOverrides((prev) => ({ ...prev, [key]: Number(e.target.value) || 0 }))
+                                  }
+                                  disabled={isSaved}
+                                  className="h-10"
+                                />
                               </div>
                               <div className="space-y-2">
                                 <Label>Weekly Pay</Label>

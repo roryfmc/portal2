@@ -60,6 +60,8 @@ export interface Operative {
   timeOffRequests?: TimeOffRequest[]
   siteAssignments?: SiteAssignment[]
   siteLinks?: any[]
+  // Optional pay rate used by timesheets
+  hourlyRate?: number | null
   createdAt: string
   updatedAt: string
   unableToWorkWith?: UnableToWorkWith[]
@@ -201,7 +203,15 @@ export interface TimeEntry {
   endTime: string   // "HH:mm"
   breakDuration: number // minutes
   totalHours: number
-  hourlyRate: number
+  hourlyRate?: number | null
   status: TimeEntryStatus
   notes?: string
+}
+
+// Attendance rows persist presence; existence means present
+export interface DailyAttendance {
+  id: string
+  siteId: string
+  operativeId: string
+  date: string // YYYY-MM-DD
 }
