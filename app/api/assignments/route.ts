@@ -134,6 +134,17 @@ export async function PUT(req: Request) {
       const desired = String(status).toUpperCase()
       if (["AVAILABLE", "ASSIGNED", "DEPLOYED", "OFFSITE"].includes(desired)) {
         data.status = desired as any
+        if (desired === "OFFSITE") {
+          // If caller didn't specify an endDate, end the assignment as of yesterday to avoid being considered active
+          if (!data.endDate) {
+            const now = new Date(); now.setHours(0,0,0,0)
+            const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1)
+            data.endDate = yesterday as any
+          }
+          if (typeof reason === "string" && reason.trim().length) {
+            ;(data as any).offsiteReason = reason.trim()
+          }
+        }
       }
     }
 

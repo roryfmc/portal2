@@ -217,13 +217,17 @@ export function SiteManagement() {
   }
 
   const getAssignedOperatives = (siteId: string) => {
-    // Exclude OFFSITE from any site attachment listings
-    const siteAssignments = assignments.filter(
-      (a: any) => String(a.siteId) === String(siteId) && String(a?.status || "").toUpperCase() !== "OFFSITE",
-    )
-    return siteAssignments
-      .map((a) => operatives.find((o) => String(o.id) === String(a.operativeId)))
-      .filter(Boolean) as Operative[]
+    // Exclude OFFSITE from current attachment listings and de-duplicate by operativeId
+    const seen = new Set<string>()
+    const result: Operative[] = []
+    for (const a of assignments as any) {
+      if (String(a.siteId) !== String(siteId)) continue
+      const status = String(a?.status || "").toUpperCase()
+      if (status === "OFFSITE") continue
+      const op = operatives.find((o) => String(o.id) === String(a.operativeId))
+      if (op && !seen.has(op.id)) { seen.add(op.id); result.push(op) }
+    }
+    return result
   }
 
   const isOperativeDeployedThisWeek = (operativeId: string) => {
@@ -1154,25 +1158,26 @@ export function SiteManagement() {
 
                         <Tabs defaultValue="assigned" className="w-full">
                           <TabsList className="grid w-full grid-cols-3">
-                            <TabsTrigger value="assigned">Assigned ({assignedOperatives.filter((o) =>assignments.some((a) =>String(a.siteId) === String(site.id) &&
-                            String(a.operativeId) === String(o.id) &&
-                            String(a.status).toUpperCase() === "ASSIGNED"
-                                  )
-                                 ).length
-                                })</TabsTrigger>
-                            <TabsTrigger value="current">This Week ({assignedOperatives.filter((o) =>assignments.some((a) =>String(a.siteId) === String(site.id) &&
-                            String(a.operativeId) === String(o.id) &&
-                            String(a.status).toUpperCase() === "DEPLOYED"
-                                  )
-                                 ).length
-                                })
+                            <TabsTrigger value="assigned">
+                              Assigned ({new Set(
+                                (assignments as any)
+                                  .filter((a: any) => String(a.siteId) === String(site.id) && String(a.status).toUpperCase() === "ASSIGNED")
+                                  .map((a: any) => String(a.operativeId))
+                              ).size})
                             </TabsTrigger>
-                            <TabsTrigger value="off-site">Off Site ({assignedOperatives.filter((o) =>assignments.some((a) =>String(a.siteId) === String(site.id) &&
-                            String(a.operativeId) === String(o.id) &&
-                            String(a.status).toUpperCase() === "OFFSITE"
-                                  )
-                                 ).length
-                                })
+                            <TabsTrigger value="current">
+                              This Week ({new Set(
+                                (assignments as any)
+                                  .filter((a: any) => String(a.siteId) === String(site.id) && String(a.status).toUpperCase() === "DEPLOYED")
+                                  .map((a: any) => String(a.operativeId))
+                              ).size})
+                            </TabsTrigger>
+                            <TabsTrigger value="off-site">
+                              Off Site ({new Set(
+                                (assignments as any)
+                                  .filter((a: any) => String(a.siteId) === String(site.id) && String(a.status).toUpperCase() === "OFFSITE")
+                                  .map((a: any) => String(a.operativeId))
+                              ).size})
                             </TabsTrigger>
                           </TabsList>
                         {/* ASSIGNED OPERATIVES TAB */}         
@@ -1479,6 +1484,48 @@ export function SiteManagement() {
                         {/* MOVED OFF SITE OPERATIVES TAB */} 
                           <TabsContent value="off-site" className="space-y-2">
                             <p className="text-sm text-slate-600">Operatives moved off site</p>
+                            {(() => {
+                              const offsiteRows = (assignments as any).filter(
+                                (a: any) => String(a.siteId) === String(site.id) && String(a.status).toUpperCase() === "OFFSITE",
+                              )
+                              const byOp = new Map<string, any>()
+                              for (const a of offsiteRows) {
+                                const key = String(a.operativeId)
+                                // Keep the latest offsite record per operative
+                                if (!byOp.has(key)) byOp.set(key, a)
+                                else {
+                                  const prev = byOp.get(key)
+                                  if (new Date(a.endDate) > new Date(prev.endDate)) byOp.set(key, a)
+                                }
+                              }
+                              const items = Array.from(byOp.values())
+                              if (items.length === 0) return (
+                                <p className="text-sm text-slate-600 py-4 text-center">No operatives moved off site</p>
+                              )
+                              return items.map((a: any) => {
+                                const op = operatives.find((o) => String(o.id) === String(a.operativeId))
+                                const name = op?.personalDetails?.fullName || op?.id || a.operativeId
+                                const start = new Date(a.startDate)
+                                const end = new Date(a.endDate)
+                                const reason = a.offsiteReason || ""
+                                return (
+                                  <div key={a.id} className="p-3 border rounded bg-slate-50">
+                                    <div className="flex items-center justify-between">
+                                      <div>
+                                        <p className="font-medium text-sm">{name}</p>
+                                        <p className="text-xs text-slate-600">
+                                          {start.toLocaleDateString()} – {end.toLocaleDateString()}
+                                        </p>
+                                      </div>
+                                      <Badge variant="outline" className="text-xs">Off Site</Badge>
+                                    </div>
+                                    {reason && (
+                                      <p className="text-xs text-slate-700 mt-2">Reason: {reason}</p>
+                                    )}
+                                  </div>
+                                )
+                              })
+                            })()}
                           </TabsContent>
                         </Tabs>
                       </div>
